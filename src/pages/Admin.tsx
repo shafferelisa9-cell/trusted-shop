@@ -445,8 +445,8 @@ const Admin = () => {
                       </button>
                     ))}
                   </div>
-                  {custKey && !decryptedDetails[o.id] && (
-                    <button onClick={() => decryptOrder(o.id, o.encrypted_details, custKey)} className="text-xs underline hover:opacity-60">
+                  {(custKey || (o as any).sender_public_key) && !decryptedDetails[o.id] && (
+                    <button onClick={() => decryptOrder(o.id, o.encrypted_details, custKey, (o as any).sender_public_key)} className="text-xs underline hover:opacity-60">
                       Decrypt details
                     </button>
                   )}
