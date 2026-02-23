@@ -141,10 +141,12 @@ const Admin = () => {
     }
   };
 
-  const decryptOrder = async (orderId: string, encrypted: string, customerPubKey: string) => {
+  const decryptOrder = async (orderId: string, encrypted: string, customerPubKey: string, orderSenderPubKey?: string) => {
     const key = getAdminPrivateKey();
     if (!key) return;
-    const decrypted = await decryptMessage(encrypted, key, customerPubKey);
+    // Use the sender's public key stored at order creation time, fallback to current DB key
+    const pubKey = orderSenderPubKey || customerPubKey;
+    const decrypted = await decryptMessage(encrypted, key, pubKey);
     setDecryptedDetails((prev) => ({ ...prev, [orderId]: decrypted }));
   };
 
