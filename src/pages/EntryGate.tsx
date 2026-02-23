@@ -6,7 +6,7 @@ const EntryGate = ({ onEnter }: { onEnter: () => void }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (code.trim()) {
+    if (code.trim().toUpperCase() === 'NAGSOM') {
       setEntryCode(code.trim());
       onEnter();
     }
