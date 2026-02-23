@@ -15,7 +15,7 @@ const EntryGate = ({ onEnter }: { onEnter: () => void }) => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <form onSubmit={handleSubmit} className="w-full max-w-sm px-6">
-        <h1 className="text-sm font-medium mb-8 text-center tracking-widest">ENTER CODE</h1>
+        <h1 className="text-sm font-medium mb-8 text-center tracking-widest">NAGSOM</h1>
         <input
           type="text"
           value={code}

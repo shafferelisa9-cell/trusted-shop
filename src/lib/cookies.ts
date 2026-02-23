@@ -4,6 +4,7 @@ const COOKIE_OPTIONS = { expires: 365, sameSite: 'strict' as const };
 
 export const getEntryCode = () => Cookies.get('entry_code');
 export const setEntryCode = (code: string) => Cookies.set('entry_code', code, COOKIE_OPTIONS);
+export const clearEntryCode = () => Cookies.remove('entry_code');
 
 export const getUserId = () => Cookies.get('user_id');
 export const setUserId = (id: string) => Cookies.set('user_id', id, COOKIE_OPTIONS);
