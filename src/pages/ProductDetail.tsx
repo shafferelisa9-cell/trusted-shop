@@ -1,20 +1,33 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import Header from '@/components/Header';
 import OrderForm from '@/components/OrderForm';
+import { useCart } from '@/contexts/CartContext';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Product = Tables<'products'>;
 
+interface Review {
+  id: string;
+  rating: number;
+  comment: string;
+  created_at: string;
+}
+
 const ProductDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [product, setProduct] = useState<Product | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const { addItem } = useCart();
 
   useEffect(() => {
     if (!id) return;
     supabase.from('products').select('*').eq('id', id).single().then(({ data }) => {
       if (data) setProduct(data);
+    });
+    supabase.from('reviews').select('*').eq('product_id', id).order('created_at', { ascending: false }).limit(3).then(({ data }) => {
+      if (data) setReviews(data);
     });
   }, [id]);
 
@@ -28,6 +41,10 @@ const ProductDetail = () => {
       </div>
     );
   }
+
+  const avgRating = reviews.length
+    ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)
+    : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -44,15 +61,33 @@ const ProductDetail = () => {
             </div>
             <p className="text-sm leading-relaxed opacity-80">{product.description}</p>
 
+            <button
+              onClick={() => addItem(product)}
+              className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors"
+            >
+              ADD TO CART
+            </button>
+
             <div className="border-t border-foreground pt-8">
-              <h2 className="text-xs font-medium tracking-widest mb-4">REVIEWS</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xs font-medium tracking-widest">
+                  REVIEWS {avgRating && <span className="font-mono ml-2">({avgRating} ★)</span>}
+                </h2>
+                <Link to={`/reviews/${product.id}`} className="text-xs underline hover:opacity-60">
+                  All reviews
+                </Link>
+              </div>
               <div className="space-y-4">
-                {['Great product, fast shipping.', 'Exactly as described.', 'Would order again.'].map((r, i) => (
-                  <div key={i} className="text-sm">
-                    <span className="opacity-40">Anonymous — </span>
-                    {r}
-                  </div>
-                ))}
+                {reviews.length === 0 ? (
+                  <p className="text-sm opacity-40">No reviews yet.</p>
+                ) : (
+                  reviews.map((r) => (
+                    <div key={r.id} className="text-sm">
+                      <span className="opacity-40">{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)} — </span>
+                      {r.comment}
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
