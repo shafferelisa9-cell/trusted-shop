@@ -10,7 +10,7 @@ import { Link } from 'react-router-dom';
 interface Msg {
   id: string;
   content: string;
-  sender_type: string;
+  sender: string;
   created_at: string;
   decrypted?: string;
 }
@@ -20,6 +20,7 @@ const Messages = () => {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [ready, setReady] = useState(false);
 
   const fetchMessages = async () => {
     const userId = getUserId();
@@ -27,26 +28,26 @@ const Messages = () => {
     const { data } = await supabase
       .from('messages')
       .select('*')
-      .eq('order_id', userId) // using order_id as conversation thread id (user_id)
+      .eq('order_id', userId)
       .order('created_at', { ascending: true });
 
     if (data) {
       const privateKey = getPrivateKey();
-      const adminPubKey = getAdminPublicKey();
+      const adminPubKey = await getAdminPublicKey();
       if (privateKey && adminPubKey) {
         const decrypted = await Promise.all(
           data.map(async (msg: any) => {
             try {
               const d = await decryptMessage(msg.encrypted_content, privateKey, adminPubKey);
-              return { ...msg, content: msg.encrypted_content, decrypted: d };
+              return { ...msg, decrypted: d };
             } catch {
-              return { ...msg, content: msg.encrypted_content, decrypted: '[encrypted]' };
+              return { ...msg, decrypted: '[encrypted]' };
             }
           })
         );
         setMessages(decrypted);
       } else {
-        setMessages(data.map((m: any) => ({ ...m, content: m.encrypted_content, decrypted: '[no keys]' })));
+        setMessages(data.map((m: any) => ({ ...m, decrypted: adminPubKey ? '[no private key]' : '[admin key not set]' })));
       }
     }
   };
@@ -54,18 +55,37 @@ const Messages = () => {
   useEffect(() => {
     if (!user) return;
 
-    // Ensure user has crypto keys
     const initKeys = async () => {
-      if (!getUserId()) {
-        const { publicKey, privateKey } = await generateKeyPair();
-        setPrivateKey(privateKey);
-        const { data } = await supabase
+      // Check if user already has a users row linked to their auth account
+      let currentUserId = getUserId();
+
+      if (!currentUserId) {
+        // Check DB for existing user row with this auth_id
+        const { data: existingUser } = await supabase
           .from('users')
-          .insert({ public_key: publicKey, auth_id: user.id } as any)
           .select('id')
-          .single();
-        if (data) setUserId(data.id);
+          .eq('auth_id', user.id)
+          .maybeSingle();
+
+        if (existingUser) {
+          setUserId(existingUser.id);
+          currentUserId = existingUser.id;
+        } else {
+          // Create new keypair and user row
+          const { publicKey, privateKey } = await generateKeyPair();
+          setPrivateKey(privateKey);
+          const { data } = await supabase
+            .from('users')
+            .insert({ public_key: publicKey, auth_id: user.id } as any)
+            .select('id')
+            .single();
+          if (data) {
+            setUserId(data.id);
+            currentUserId = data.id;
+          }
+        }
       }
+      setReady(true);
     };
 
     initKeys().then(fetchMessages);
@@ -85,7 +105,7 @@ const Messages = () => {
   const handleSend = async () => {
     if (!input.trim()) return;
     const privateKey = getPrivateKey();
-    const adminPubKey = getAdminPublicKey();
+    const adminPubKey = await getAdminPublicKey();
     const userId = getUserId();
     if (!privateKey || !adminPubKey || !userId) return;
 
@@ -93,7 +113,7 @@ const Messages = () => {
     try {
       const encrypted = await encryptMessage(input, privateKey, adminPubKey);
       await supabase.from('messages').insert({
-        order_id: userId, // thread = user id
+        order_id: userId,
         encrypted_content: encrypted,
         sender: 'customer',
       });
@@ -129,14 +149,16 @@ const Messages = () => {
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`text-sm ${msg.sender_type === 'admin' || (msg as any).sender === 'admin' ? 'text-right' : 'text-left'}`}
+                className={`text-sm ${msg.sender === 'admin' ? 'text-right' : 'text-left'}`}
               >
-                <span className="text-xs opacity-40 uppercase">{(msg as any).sender || 'customer'}</span>
+                <span className="text-xs opacity-40 uppercase">{msg.sender}</span>
                 <p className="mt-0.5">{msg.decrypted || '[encrypted]'}</p>
               </div>
             ))}
             {messages.length === 0 && (
-              <p className="text-sm opacity-40 text-center py-8">No messages yet. Send a message to the store.</p>
+              <p className="text-sm opacity-40 text-center py-8">
+                {!ready ? 'Initializing encryption...' : 'No messages yet. Send a message to the store.'}
+              </p>
             )}
           </div>
           <div className="border-t border-foreground flex">

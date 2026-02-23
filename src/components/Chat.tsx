@@ -23,21 +23,19 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
 
-  const getKeys = () => {
+  const getKeys = async () => {
     const privateKey = isAdmin ? getAdminPrivateKey() : getPrivateKey();
-    const counterpartPublicKey = isAdmin ? customerPublicKey : getAdminPublicKey();
+    const counterpartPublicKey = isAdmin ? customerPublicKey : await getAdminPublicKey();
     return { privateKey, counterpartPublicKey };
   };
 
   const decryptAll = async (msgs: Message[]) => {
-    const { privateKey, counterpartPublicKey } = getKeys();
+    const { privateKey, counterpartPublicKey } = await getKeys();
     if (!privateKey || !counterpartPublicKey) return msgs;
 
     return Promise.all(
       msgs.map(async (msg) => {
         try {
-          // For messages sent BY the counterpart, decrypt with our privkey + their pubkey
-          // For messages sent BY us, we also encrypted with our privkey + their pubkey (same shared secret)
           const decrypted = await decryptMessage(msg.encrypted_content, privateKey, counterpartPublicKey);
           return { ...msg, decrypted };
         } catch {
@@ -83,7 +81,7 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
     setSending(true);
 
     try {
-      const { privateKey, counterpartPublicKey } = getKeys();
+      const { privateKey, counterpartPublicKey } = await getKeys();
       if (!privateKey || !counterpartPublicKey) throw new Error('Missing keys');
 
       const encrypted = await encryptMessage(input, privateKey, counterpartPublicKey);

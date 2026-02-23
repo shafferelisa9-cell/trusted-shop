@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { decryptMessage } from '@/lib/e2e-crypto';
+import { decryptMessage, encryptMessage, generateKeyPair } from '@/lib/e2e-crypto';
 import { getAdminPrivateKey, setAdminPrivateKey } from '@/lib/cookies';
-import { generateKeyPair } from '@/lib/e2e-crypto';
 import { setAdminPublicKey } from '@/lib/admin-keys';
+import Header from '@/components/Header';
 
 const Admin = () => {
   const { user, isAdmin, loading } = useAuth();
@@ -25,12 +25,15 @@ const Admin = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [decryptedDetails, setDecryptedDetails] = useState<Record<string, string>>({});
 
-  // Messages (all user threads)
-  const [threads, setThreads] = useState<any[]>([]);
+  // Messages
+  const [threads, setThreads] = useState<{ id: string; email?: string }[]>([]);
   const [selectedThread, setSelectedThread] = useState<string | null>(null);
   const [threadMessages, setThreadMessages] = useState<any[]>([]);
   const [replyInput, setReplyInput] = useState('');
   const [replySending, setReplySending] = useState(false);
+
+  // Stats
+  const [stats, setStats] = useState({ total: 0, pending: 0, revenue: 0 });
 
   useEffect(() => {
     if (!loading && (!user || !isAdmin)) {
@@ -56,11 +59,13 @@ const Admin = () => {
     setGeneratedKeys(keys);
   };
 
-  const handleSaveKeys = (e: React.FormEvent) => {
+  const handleSaveKeys = async (e: React.FormEvent) => {
     e.preventDefault();
     const key = generatedKeys ? generatedKeys.privateKey : privateKeyInput;
     setAdminPrivateKey(key);
-    if (generatedKeys) setAdminPublicKey(generatedKeys.publicKey);
+    if (generatedKeys) {
+      await setAdminPublicKey(generatedKeys.publicKey);
+    }
     setHasKey(true);
   };
 
@@ -91,7 +96,13 @@ const Admin = () => {
   // Orders
   const fetchOrders = async () => {
     const { data } = await supabase.from('orders').select('*, products(name), users(public_key)').order('created_at', { ascending: false });
-    if (data) setOrders(data);
+    if (data) {
+      setOrders(data);
+      const total = data.length;
+      const pending = data.filter((o: any) => o.status === 'pending').length;
+      const revenue = data.filter((o: any) => o.status === 'delivered' || o.status === 'confirmed' || o.status === 'shipped').reduce((sum: number, o: any) => sum + Number(o.price_xmr), 0);
+      setStats({ total, pending, revenue });
+    }
   };
 
   const decryptOrder = async (orderId: string, encrypted: string, customerPubKey: string) => {
@@ -108,14 +119,25 @@ const Admin = () => {
 
   // Messages
   const fetchThreads = async () => {
-    // Get distinct order_ids (thread ids) from messages
     const { data } = await supabase
       .from('messages')
       .select('order_id')
       .order('created_at', { ascending: false });
     if (data) {
-      const uniqueThreads = [...new Set(data.map((m: any) => m.order_id))];
-      setThreads(uniqueThreads);
+      const uniqueIds = [...new Set(data.map((m: any) => m.order_id))];
+      // Fetch user emails via users -> profiles
+      const threadList = await Promise.all(
+        uniqueIds.map(async (id) => {
+          const { data: userData } = await supabase.from('users').select('auth_id').eq('id', id).maybeSingle();
+          let email: string | undefined;
+          if (userData?.auth_id) {
+            const { data: profile } = await supabase.from('profiles').select('email').eq('auth_id', userData.auth_id).maybeSingle();
+            email = profile?.email ?? undefined;
+          }
+          return { id, email };
+        })
+      );
+      setThreads(threadList);
     }
   };
 
@@ -129,7 +151,6 @@ const Admin = () => {
 
     if (data) {
       const adminKey = getAdminPrivateKey();
-      // Get customer public key
       const { data: userData } = await supabase.from('users').select('public_key').eq('id', threadId).single();
       const custPubKey = userData?.public_key;
 
@@ -159,9 +180,7 @@ const Admin = () => {
       const { data: userData } = await supabase.from('users').select('public_key').eq('id', selectedThread).single();
       if (!adminKey || !userData?.public_key) return;
 
-      const { encryptMessage } = await import('@/lib/e2e-crypto');
       const encrypted = await encryptMessage(replyInput, adminKey, userData.public_key);
-
       await supabase.from('messages').insert({
         order_id: selectedThread,
         encrypted_content: encrypted,
@@ -177,6 +196,19 @@ const Admin = () => {
     }
   };
 
+  // Realtime for messages
+  useEffect(() => {
+    if (!isAdmin || !hasKey) return;
+    const channel = supabase
+      .channel('admin-messages')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+        fetchThreads();
+        if (selectedThread) openThread(selectedThread);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [isAdmin, hasKey, selectedThread]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -189,43 +221,46 @@ const Admin = () => {
 
   if (!hasKey) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="w-full max-w-lg px-6 space-y-6">
-          <h1 className="text-sm font-medium text-center tracking-widest">ADMIN — SETUP ENCRYPTION</h1>
-          {!generatedKeys ? (
-            <div className="space-y-4">
-              <button onClick={handleGenerateKeys} className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">
-                GENERATE NEW KEYPAIR
-              </button>
-              <div className="text-center text-xs opacity-40">— OR —</div>
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="flex items-center justify-center py-20">
+          <div className="w-full max-w-lg px-6 space-y-6">
+            <h1 className="text-sm font-medium text-center tracking-widest">ADMIN — SETUP ENCRYPTION</h1>
+            {!generatedKeys ? (
+              <div className="space-y-4">
+                <button onClick={handleGenerateKeys} className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">
+                  GENERATE NEW KEYPAIR
+                </button>
+                <div className="text-center text-xs opacity-40">— OR —</div>
+                <form onSubmit={handleSaveKeys} className="space-y-4">
+                  <textarea
+                    value={privateKeyInput}
+                    onChange={(e) => setPrivateKeyInput(e.target.value)}
+                    className="w-full border border-foreground bg-background p-4 text-xs font-mono resize-none h-32 focus:outline-none"
+                    placeholder="Paste existing private key..."
+                  />
+                  <button type="submit" className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">
+                    IMPORT KEY
+                  </button>
+                </form>
+              </div>
+            ) : (
               <form onSubmit={handleSaveKeys} className="space-y-4">
-                <textarea
-                  value={privateKeyInput}
-                  onChange={(e) => setPrivateKeyInput(e.target.value)}
-                  className="w-full border border-foreground bg-background p-4 text-xs font-mono resize-none h-32 focus:outline-none"
-                  placeholder="Paste existing private key..."
-                />
+                <div className="space-y-2">
+                  <label className="text-xs block">PUBLIC KEY (saved to database for customers)</label>
+                  <textarea readOnly value={generatedKeys.publicKey} className="w-full border border-foreground bg-muted p-3 text-xs font-mono resize-none h-16 focus:outline-none" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs block">PRIVATE KEY (save securely!)</label>
+                  <textarea readOnly value={generatedKeys.privateKey} className="w-full border border-foreground bg-muted p-3 text-xs font-mono resize-none h-32 focus:outline-none" />
+                </div>
+                <p className="text-xs opacity-60">⚠ Copy your private key somewhere safe.</p>
                 <button type="submit" className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">
-                  IMPORT KEY
+                  SAVE & CONTINUE
                 </button>
               </form>
-            </div>
-          ) : (
-            <form onSubmit={handleSaveKeys} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs block">PUBLIC KEY (saved automatically for customers)</label>
-                <textarea readOnly value={generatedKeys.publicKey} className="w-full border border-foreground bg-muted p-3 text-xs font-mono resize-none h-16 focus:outline-none" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs block">PRIVATE KEY (save securely!)</label>
-                <textarea readOnly value={generatedKeys.privateKey} className="w-full border border-foreground bg-muted p-3 text-xs font-mono resize-none h-32 focus:outline-none" />
-              </div>
-              <p className="text-xs opacity-60">⚠ Copy your private key somewhere safe.</p>
-              <button type="submit" className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">
-                SAVE & CONTINUE
-              </button>
-            </form>
-          )}
+            )}
+          </div>
         </div>
       </div>
     );
@@ -233,6 +268,7 @@ const Admin = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <Header />
       <div className="border-b border-foreground">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <span className="text-sm font-medium tracking-widest">ADMIN DASHBOARD</span>
@@ -247,6 +283,15 @@ const Admin = () => {
               </button>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Stats bar */}
+      <div className="border-b border-foreground">
+        <div className="max-w-5xl mx-auto px-6 py-3 flex gap-8 text-sm">
+          <div><span className="opacity-40">Orders:</span> <span className="font-mono">{stats.total}</span></div>
+          <div><span className="opacity-40">Pending:</span> <span className="font-mono">{stats.pending}</span></div>
+          <div><span className="opacity-40">Revenue:</span> <span className="font-mono">{stats.revenue.toFixed(4)} XMR</span></div>
         </div>
       </div>
 
@@ -266,30 +311,35 @@ const Admin = () => {
             <div className="space-y-px border border-foreground">
               {products.map((p) => (
                 <div key={p.id} className="p-4 border-b border-foreground last:border-b-0">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm">
-                      <span className="font-medium">{p.name}</span>
-                      {editingProduct === p.id ? (
-                        <span className="ml-2">
-                          <input
-                            type="number"
-                            step="0.001"
-                            value={editPrice}
-                            onChange={(e) => setEditPrice(parseFloat(e.target.value))}
-                            className="w-24 border border-foreground bg-background px-2 py-1 text-xs font-mono focus:outline-none"
-                          />
-                          <button onClick={() => updatePrice(p.id)} className="ml-2 text-xs underline">Save</button>
-                          <button onClick={() => setEditingProduct(null)} className="ml-2 text-xs underline opacity-40">Cancel</button>
-                        </span>
-                      ) : (
-                        <span className="font-mono ml-2">{p.price_xmr} XMR
-                          <button onClick={() => { setEditingProduct(p.id); setEditPrice(p.price_xmr); }} className="ml-2 text-xs underline opacity-60">edit</button>
-                        </span>
-                      )}
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-muted border border-foreground flex-shrink-0">
+                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
                     </div>
-                    <button onClick={() => deleteProduct(p.id)} className="text-xs border border-foreground px-3 py-1 hover:bg-foreground hover:text-background transition-colors">DELETE</button>
+                    <div className="flex-1 flex items-center justify-between">
+                      <div className="text-sm">
+                        <span className="font-medium">{p.name}</span>
+                        {editingProduct === p.id ? (
+                          <span className="ml-2">
+                            <input
+                              type="number"
+                              step="0.001"
+                              value={editPrice}
+                              onChange={(e) => setEditPrice(parseFloat(e.target.value))}
+                              className="w-24 border border-foreground bg-background px-2 py-1 text-xs font-mono focus:outline-none"
+                            />
+                            <button onClick={() => updatePrice(p.id)} className="ml-2 text-xs underline">Save</button>
+                            <button onClick={() => setEditingProduct(null)} className="ml-2 text-xs underline opacity-40">Cancel</button>
+                          </span>
+                        ) : (
+                          <span className="font-mono ml-2">{p.price_xmr} XMR
+                            <button onClick={() => { setEditingProduct(p.id); setEditPrice(p.price_xmr); }} className="ml-2 text-xs underline opacity-60">edit</button>
+                          </span>
+                        )}
+                      </div>
+                      <button onClick={() => deleteProduct(p.id)} className="text-xs border border-foreground px-3 py-1 hover:bg-foreground hover:text-background transition-colors">DELETE</button>
+                    </div>
                   </div>
-                  <p className="text-xs opacity-60 mt-1">{p.description}</p>
+                  <p className="text-xs opacity-60 mt-1 ml-16">{p.description}</p>
                 </div>
               ))}
             </div>
@@ -308,7 +358,11 @@ const Admin = () => {
                     <span className="font-medium">{(o as any).products?.name || 'Product'} — <span className="font-mono">{o.price_xmr} XMR</span></span>
                     <span className="uppercase text-xs border border-foreground px-2 py-1">{o.status}</span>
                   </div>
-                  <div className="text-xs opacity-40 font-mono">Token: {o.tracking_token.slice(0, 12)}...</div>
+                  <div className="text-xs opacity-60 space-y-1">
+                    <div className="font-mono">XMR Address: {o.xmr_address || '—'}</div>
+                    <div>Date: {new Date(o.created_at).toLocaleDateString()}</div>
+                    <div className="font-mono">Token: {o.tracking_token.slice(0, 12)}...</div>
+                  </div>
                   <div className="flex gap-2 flex-wrap">
                     {['pending', 'confirmed', 'shipped', 'delivered'].map((s) => (
                       <button key={s} onClick={() => updateStatus(o.id, s)} className={`text-xs border border-foreground px-3 py-1 ${o.status === s ? 'bg-foreground text-background' : 'hover:bg-foreground hover:text-background'} transition-colors`}>
@@ -316,7 +370,7 @@ const Admin = () => {
                       </button>
                     ))}
                   </div>
-                  {custKey && (
+                  {custKey && !decryptedDetails[o.id] && (
                     <button onClick={() => decryptOrder(o.id, o.encrypted_details, custKey)} className="text-xs underline hover:opacity-60">
                       Decrypt details
                     </button>
@@ -339,13 +393,14 @@ const Admin = () => {
               </div>
               <div className="max-h-96 overflow-y-auto">
                 {threads.length === 0 && <p className="text-xs opacity-40 p-3">No conversations.</p>}
-                {threads.map((threadId) => (
+                {threads.map((thread) => (
                   <button
-                    key={threadId}
-                    onClick={() => openThread(threadId)}
-                    className={`w-full text-left p-3 text-xs font-mono border-b border-foreground last:border-b-0 hover:bg-muted transition-colors ${selectedThread === threadId ? 'bg-muted' : ''}`}
+                    key={thread.id}
+                    onClick={() => openThread(thread.id)}
+                    className={`w-full text-left p-3 text-xs border-b border-foreground last:border-b-0 hover:bg-muted transition-colors ${selectedThread === thread.id ? 'bg-muted' : ''}`}
                   >
-                    {threadId.slice(0, 12)}...
+                    <div className="font-medium">{thread.email || 'Unknown user'}</div>
+                    <div className="font-mono opacity-40 mt-0.5">{thread.id.slice(0, 8)}...</div>
                   </button>
                 ))}
               </div>

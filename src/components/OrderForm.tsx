@@ -22,7 +22,7 @@ const OrderForm = ({ product }: { product: Product }) => {
     e.preventDefault();
     const userId = getUserId();
     const privateKey = getPrivateKey();
-    const adminPubKey = getAdminPublicKey();
+    const adminPubKey = await getAdminPublicKey();
 
     if (!userId || !privateKey) return;
     if (!adminPubKey) {
