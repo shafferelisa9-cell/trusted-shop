@@ -1,17 +1,32 @@
-// Admin password for the /admin panel
-export const ADMIN_PASSWORD = 'admin123';
+import { supabase } from '@/integrations/supabase/client';
 
-// Admin public key is stored in the database or generated on first admin setup.
-// The admin generates a keypair in the admin panel and shares the public key.
-// This key will be set dynamically when the admin configures their keys.
-
-// localStorage key for admin public key
-const ADMIN_PUB_KEY_STORAGE = 'admin_public_key';
-
-export function getAdminPublicKey(): string | null {
-  return localStorage.getItem(ADMIN_PUB_KEY_STORAGE);
+// Fetch admin public key from database
+export async function getAdminPublicKey(): Promise<string | null> {
+  const { data } = await supabase
+    .from('admin_settings' as any)
+    .select('public_key')
+    .limit(1)
+    .single();
+  return (data as any)?.public_key ?? null;
 }
 
-export function setAdminPublicKey(key: string): void {
-  localStorage.setItem(ADMIN_PUB_KEY_STORAGE, key);
+// Save admin public key to database (upsert)
+export async function setAdminPublicKey(key: string): Promise<void> {
+  // Try to get existing row
+  const { data: existing } = await supabase
+    .from('admin_settings' as any)
+    .select('id')
+    .limit(1)
+    .single();
+
+  if ((existing as any)?.id) {
+    await supabase
+      .from('admin_settings' as any)
+      .update({ public_key: key, updated_at: new Date().toISOString() } as any)
+      .eq('id', (existing as any).id);
+  } else {
+    await supabase
+      .from('admin_settings' as any)
+      .insert({ public_key: key } as any);
+  }
 }

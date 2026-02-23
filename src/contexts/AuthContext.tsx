@@ -25,35 +25,55 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   const checkAdmin = async (userId: string) => {
-    const { data } = await supabase.rpc('has_role', {
-      _user_id: userId,
-      _role: 'admin',
-    } as any);
-    setIsAdmin(!!data);
+    try {
+      const { data } = await supabase.rpc('has_role', {
+        _user_id: userId,
+        _role: 'admin',
+      } as any);
+      setIsAdmin(!!data);
+    } catch {
+      setIsAdmin(false);
+    }
   };
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      if (u) {
-        await checkAdmin(u.id);
-      } else {
-        setIsAdmin(false);
-      }
-      setLoading(false);
-    });
+    let isMounted = true;
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      if (u) {
-        await checkAdmin(u.id);
+    // Listener for ONGOING auth changes (does NOT control loading)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!isMounted) return;
+        const u = session?.user ?? null;
+        setUser(u);
+        if (u) {
+          setTimeout(() => checkAdmin(u.id), 0);
+        } else {
+          setIsAdmin(false);
+        }
       }
-      setLoading(false);
-    });
+    );
 
-    return () => subscription.unsubscribe();
+    // INITIAL load — controls loading state
+    const initializeAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!isMounted) return;
+        const u = session?.user ?? null;
+        setUser(u);
+        if (u) {
+          await checkAdmin(u.id);
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    initializeAuth();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string): Promise<string | null> => {
