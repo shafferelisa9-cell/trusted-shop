@@ -192,11 +192,20 @@ const Admin = () => {
       const { data: userData } = await supabase.from('users').select('public_key').eq('id', threadId).single();
       const custPubKey = userData?.public_key;
 
-      if (adminKey && custPubKey) {
+      if (adminKey) {
         const decrypted = await Promise.all(
           data.map(async (msg: any) => {
             try {
-              const d = await decryptMessage(msg.encrypted_content, adminKey, custPubKey);
+              let pubKeyForDecrypt: string | null;
+              if (msg.sender === 'customer') {
+                // Use sender_public_key stored at send time, fallback to current DB key
+                pubKeyForDecrypt = msg.sender_public_key || custPubKey || null;
+              } else {
+                // Admin's own messages: need customer pub key to derive same shared secret
+                pubKeyForDecrypt = custPubKey || null;
+              }
+              if (!pubKeyForDecrypt) return { ...msg, decrypted: '[missing key]' };
+              const d = await decryptMessage(msg.encrypted_content, adminKey, pubKeyForDecrypt);
               return { ...msg, decrypted: d };
             } catch {
               return { ...msg, decrypted: '[unable to decrypt]' };
