@@ -228,11 +228,16 @@ const Admin = () => {
       if (!adminKey || !userData?.public_key) return;
 
       const encrypted = await encryptMessage(replyInput, adminKey, userData.public_key);
+
+      // Get admin's public key to store with message
+      const adminPubKey = await getAdminPublicKey();
+
       await supabase.from('messages').insert({
         order_id: selectedThread,
         encrypted_content: encrypted,
         sender: 'admin',
-      });
+        sender_public_key: adminPubKey,
+      } as any);
 
       setReplyInput('');
       openThread(selectedThread);
