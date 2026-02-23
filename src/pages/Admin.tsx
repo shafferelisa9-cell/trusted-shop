@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { decryptMessage, encryptMessage, generateKeyPair } from '@/lib/e2e-crypto';
 import { getAdminPrivateKey, setAdminPrivateKey } from '@/lib/cookies';
-import { setAdminPublicKey } from '@/lib/admin-keys';
+import { setAdminPublicKey, getAdminPublicKey } from '@/lib/admin-keys';
 import Header from '@/components/Header';
 
 const Admin = () => {
