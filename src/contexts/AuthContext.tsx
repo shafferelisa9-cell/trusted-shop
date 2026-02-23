@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { clearEntryCode } from '@/lib/cookies';
 import type { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
@@ -90,6 +91,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await supabase.auth.signOut();
     setUser(null);
     setIsAdmin(false);
+    clearEntryCode();
+    window.location.href = '/';
   };
 
   return (
