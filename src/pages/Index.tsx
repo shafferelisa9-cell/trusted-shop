@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getEntryCode, getUserId, setUserId } from '@/lib/cookies';
-import { getPrivateKey, setPrivateKey } from '@/lib/cookies';
+import { getEntryCode, getUserId, setUserId, getPrivateKey, setPrivateKey } from '@/lib/cookies';
 import { generateKeyPair } from '@/lib/pgp';
 import { supabase } from '@/integrations/supabase/client';
 import EntryGate from './EntryGate';
@@ -9,22 +8,39 @@ import Store from './Store';
 const Index = () => {
   const [hasCode, setHasCode] = useState(!!getEntryCode());
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasCode) return;
+    
     const initUser = async () => {
-      if (!getUserId()) {
-        const { publicKey, privateKey } = await generateKeyPair();
-        setPrivateKey(privateKey);
-        const { data } = await supabase
-          .from('users')
-          .insert({ public_key: publicKey })
-          .select('id')
-          .single();
-        if (data) setUserId(data.id);
+      try {
+        if (!getUserId()) {
+          console.log('Generating PGP keypair...');
+          const { publicKey, privateKey } = await generateKeyPair();
+          console.log('Keypair generated, saving...');
+          setPrivateKey(privateKey);
+          
+          const { data, error: dbError } = await supabase
+            .from('users')
+            .insert({ public_key: publicKey })
+            .select('id')
+            .single();
+
+          if (dbError) {
+            console.error('DB insert failed:', dbError);
+            setError('Failed to initialize user');
+            return;
+          }
+          if (data) setUserId(data.id);
+        }
+        setReady(true);
+      } catch (err) {
+        console.error('User init failed:', err);
+        setError('Failed to initialize encryption keys');
       }
-      setReady(true);
     };
+    
     initUser();
   }, [hasCode]);
 
@@ -32,10 +48,26 @@ const Index = () => {
     return <EntryGate onEnter={() => setHasCode(true)} />;
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <p className="text-sm">{error}</p>
+          <button 
+            onClick={() => { setError(null); setReady(false); }}
+            className="text-sm underline hover:opacity-60"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <p className="text-sm opacity-40">Initializing...</p>
+        <p className="text-sm opacity-40">Initializing encryption...</p>
       </div>
     );
   }
