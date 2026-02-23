@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { encryptMessage, decryptMessage } from '@/lib/e2e-crypto';
 import { getAdminPublicKey } from '@/lib/admin-keys';
-import { getPrivateKey, getAdminPrivateKey } from '@/lib/cookies';
+import { getPrivateKey, getAdminPrivateKey, getUserId } from '@/lib/cookies';
 
 interface ChatProps {
   orderId: string;
@@ -15,6 +15,7 @@ interface Message {
   encrypted_content: string;
   sender: string;
   created_at: string;
+  sender_public_key?: string;
   decrypted?: string;
 }
 
@@ -23,20 +24,33 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
 
-  const getKeys = async () => {
-    const privateKey = isAdmin ? getAdminPrivateKey() : getPrivateKey();
-    const counterpartPublicKey = isAdmin ? customerPublicKey : await getAdminPublicKey();
-    return { privateKey, counterpartPublicKey };
-  };
-
   const decryptAll = async (msgs: Message[]) => {
-    const { privateKey, counterpartPublicKey } = await getKeys();
-    if (!privateKey || !counterpartPublicKey) return msgs;
+    const privateKey = isAdmin ? getAdminPrivateKey() : getPrivateKey();
+    const adminPubKey = await getAdminPublicKey();
+    if (!privateKey) return msgs;
 
     return Promise.all(
       msgs.map(async (msg) => {
         try {
-          const decrypted = await decryptMessage(msg.encrypted_content, privateKey, counterpartPublicKey);
+          let pubKeyForDecrypt: string | null = null;
+          if (isAdmin) {
+            // Admin decrypting: customer msgs use sender_public_key, admin msgs use admin's own key (self)
+            if (msg.sender === 'customer') {
+              pubKeyForDecrypt = msg.sender_public_key || customerPublicKey || null;
+            } else {
+              // Admin's own messages - need customer pub key to derive same shared secret
+              pubKeyForDecrypt = customerPublicKey || null;
+            }
+          } else {
+            // Customer decrypting: admin msgs use sender_public_key, customer msgs use admin pub
+            if (msg.sender === 'admin') {
+              pubKeyForDecrypt = msg.sender_public_key || adminPubKey;
+            } else {
+              pubKeyForDecrypt = adminPubKey;
+            }
+          }
+          if (!pubKeyForDecrypt) return { ...msg, decrypted: '[missing key]' };
+          const decrypted = await decryptMessage(msg.encrypted_content, privateKey, pubKeyForDecrypt);
           return { ...msg, decrypted };
         } catch {
           return { ...msg, decrypted: '[unable to decrypt]' };
@@ -81,16 +95,31 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
     setSending(true);
 
     try {
-      const { privateKey, counterpartPublicKey } = await getKeys();
+      const privateKey = isAdmin ? getAdminPrivateKey() : getPrivateKey();
+      const adminPubKey = await getAdminPublicKey();
+      const counterpartPublicKey = isAdmin ? customerPublicKey : adminPubKey;
       if (!privateKey || !counterpartPublicKey) throw new Error('Missing keys');
 
       const encrypted = await encryptMessage(input, privateKey, counterpartPublicKey);
+
+      // Get sender's public key to store with message
+      let senderPubKey: string | null = null;
+      if (isAdmin) {
+        senderPubKey = adminPubKey;
+      } else {
+        const userId = getUserId();
+        if (userId) {
+          const { data } = await supabase.from('users').select('public_key').eq('id', userId).single();
+          senderPubKey = data?.public_key || null;
+        }
+      }
 
       await supabase.from('messages').insert({
         order_id: orderId,
         encrypted_content: encrypted,
         sender: isAdmin ? 'admin' : 'customer',
-      });
+        sender_public_key: senderPubKey,
+      } as any);
 
       setInput('');
     } catch (err) {
