@@ -1,51 +1,69 @@
 
 
-## Fix Messaging (Root Cause Found) and Add Product Image Upload
+## Fix Decryption Failures + Header Branding
 
-### Root Cause of Messaging Failure
+### Root Cause of "[unable to decrypt]"
 
-The `messages` table has a **foreign key constraint**: `order_id UUID NOT NULL REFERENCES public.orders(id)`. The messaging code uses `order_id` to store the **user's ID** (from the `users` table) as a thread identifier. When a customer sends a message, the insert fails silently because the user ID doesn't exist in the `orders` table -- the FK constraint rejects it.
+The encryption system uses ECDH where the shared secret depends on BOTH parties' keys: `derive(sender_private, recipient_public)`. The problem is:
 
-### Fix Plan
+1. When a customer's `private_key` cookie is lost (browser cleanup, different device, page refresh edge cases), the code in `Messages.tsx` **regenerates a new keypair** and **overwrites** the `public_key` in the database
+2. Old messages were encrypted with the OLD shared secret (old keypair). When the admin tries to decrypt, they fetch the NEW public key from the DB, producing a DIFFERENT shared secret -- decryption fails
+3. Same issue in reverse: if admin regenerates keys, old messages from customers become undecryptable
 
-#### 1. Remove the foreign key constraint on `messages.order_id` (database migration)
+### Fix Strategy
 
-Drop the FK from `messages.order_id -> orders.id` so it can be used as a generic thread ID (the user's UUID). This is the single change that will make messaging work.
+**Store the sender's public key with each message.** This way, decryption always uses the correct public key that was active when the message was sent, regardless of later key rotations.
 
-```text
-ALTER TABLE public.messages DROP CONSTRAINT messages_order_id_fkey;
-```
+### Changes Required
 
-#### 2. Add a storage bucket for product images (database migration)
+#### 1. Database Migration
+- Add `sender_public_key TEXT` column to the `messages` table (nullable for backward compat with existing messages)
+- Add `sender_public_key TEXT` column to the `orders` table for encrypted_details (so admin can always decrypt order details even after customer key rotation)
+- Add FK constraint from `orders.user_id` to `users(id)` for the admin join query
 
-Create a public `product-images` storage bucket so admins can upload images from their PC instead of pasting URLs.
+#### 2. Update message sending (Messages.tsx)
+- When sending a message, include the sender's public key in the insert
+- When decrypting messages, use `msg.sender_public_key` instead of always fetching the latest key from DB
+- For customer messages: decrypt using `customer_private_key + admin_pub` (unchanged, admin key is stable)
+- For admin messages: decrypt using `customer_private_key + msg.sender_public_key` (the admin's pub key at send time)
 
-```text
-INSERT INTO storage.buckets (id, name, public) VALUES ('product-images', 'product-images', true);
--- RLS: anyone can read, only authenticated users can upload/update/delete
-```
+#### 3. Update admin message handling (Admin.tsx)
+- When admin sends a reply, include admin's public key in the message insert
+- When decrypting customer messages, use `msg.sender_public_key` (customer's pub key at send time) instead of the current DB value
+- When decrypting order details, use `order.sender_public_key` if available, fallback to `users.public_key`
 
-#### 3. Update Admin dashboard -- product image upload from PC
+#### 4. Update Chat component (Chat.tsx)
+- Same pattern: store sender's public key on send, use it on decrypt
 
-In the Products tab of `Admin.tsx`:
-- Replace the "Image URL" text input with a file picker (`<input type="file">`)
-- When a file is selected, upload it to the `product-images` storage bucket
-- Use the resulting public URL as the product's `image_url`
-- Add an "CHANGE IMAGE" button on each existing product that allows replacing the image
+#### 5. Update OrderForm (OrderForm.tsx)
+- Store the customer's current public key alongside the order so admin can always decrypt
 
-#### 4. Add error logging to message send
+#### 6. Move private keys from cookies to localStorage
+- Cookies have size/persistence issues; localStorage is more reliable for key storage
+- Update `cookies.ts` to use localStorage for `private_key` and `admin_private_key`
+- Add migration logic: if key exists in cookie but not localStorage, move it over
 
-Add `console.error` logging in `Messages.tsx` `handleSend` to surface any future insert failures, and also show a toast/error message to the user if sending fails.
-
----
+#### 7. Header branding
+- Change "STORE" to "NAGSOM" in `Header.tsx`
 
 ### Technical Details
 
-**Database migration (single migration file):**
-- Drop FK constraint: `ALTER TABLE public.messages DROP CONSTRAINT messages_order_id_fkey;`
-- Create storage bucket: `INSERT INTO storage.buckets (id, name, public) VALUES ('product-images', 'product-images', true);`
-- Add storage RLS policies for public read and authenticated upload/delete
+**Migration SQL:**
+```text
+ALTER TABLE public.messages ADD COLUMN sender_public_key TEXT;
+ALTER TABLE public.orders ADD COLUMN sender_public_key TEXT;
+ALTER TABLE public.orders
+  ADD CONSTRAINT orders_user_id_fkey
+  FOREIGN KEY (user_id) REFERENCES public.users(id);
+```
 
 **Files to modify:**
-- `src/pages/Admin.tsx` -- Add file upload input for new products, add "CHANGE IMAGE" button for existing products, upload files to storage bucket and use public URL
-- `src/pages/Messages.tsx` -- Add error handling/logging for failed message inserts
+- `src/lib/cookies.ts` -- Move private keys to localStorage with cookie fallback
+- `src/components/Header.tsx` -- "STORE" to "NAGSOM"
+- `src/pages/Messages.tsx` -- Include sender_public_key on send; use per-message key on decrypt
+- `src/pages/Admin.tsx` -- Include sender_public_key on admin reply; use per-message key on decrypt for both messages and orders
+- `src/components/Chat.tsx` -- Include sender_public_key on send; use per-message key on decrypt
+- `src/components/OrderForm.tsx` -- Include customer public_key on order insert
+
+**Backward compatibility:** Existing messages without `sender_public_key` will fall back to fetching the current key from the DB (same behavior as now). Only future messages will be rotation-proof.
+
