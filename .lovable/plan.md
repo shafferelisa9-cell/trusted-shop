@@ -3,57 +3,122 @@
 # Privacy-First Product Store Template
 
 ## Overview
-A minimalistic black-on-white product store using Supabase as the backend. Chat messages and order info are PGP-encrypted client-side before being sent to the database, so the server only ever stores ciphertext. Private keys live in browser cookies — decryption happens automatically so the experience feels seamless.
+A minimalistic black-on-white product store using Supabase (Lovable Cloud) as the backend. Chat messages and order info are PGP-encrypted client-side before being sent to the database. Private keys live in browser cookies and decryption happens automatically so the experience feels seamless.
+
+## Key Changes from Previous Plan
+- Entry codes and public keys are independent — no linking between them
+- Each user gets their own PGP keypair (public key stored in Supabase, private key in cookies)
+- One single admin PGP keypair (both public and private key hardcoded/bundled in the app)
+- Order status includes a shareable link for tracking
 
 ---
 
-## 1. Entry Gate Screen
-- Full-screen code input on first visit
-- Code saved to cookies; auto-populated and hidden on return visits
-- Clean, centered minimal design
+## 1. Install Dependencies
+- `openpgp` for client-side PGP encryption/decryption
+- `js-cookie` for cookie management
 
-## 2. PGP Key Management (Transparent to User)
-- On first visit, a PGP keypair is auto-generated client-side (using OpenPGP.js)
-- Private key stored in browser cookies
-- Public key sent to Supabase (linked to user's entry code)
-- All encryption/decryption happens automatically — user sees normal readable text
+## 2. Supabase Setup (Lovable Cloud)
+Four tables:
 
-## 3. Store Layout
-- **Header**: Store name + minimal navigation
-- **Product Grid**: Clean cards with product name, XMR price, placeholder image
-- **Product Detail Page**:
-  - Info panel (description, specs) — stored plaintext, not sensitive
-  - Reviews section (static sample reviews)
-  - Order info section
+**products** — plaintext, not sensitive
+- id (uuid, PK), name, description, price_xmr (numeric), image_url, created_at
 
-## 4. Order & Payment Flow
-- Customer fills order form (shipping address, notes)
-- Order details are PGP-encrypted client-side before saving to Supabase
-- Payment via Monero: display XMR wallet address + amount
-- Dedicated "How to Buy Monero" text guide
-- Order status (pending/confirmed/shipped) stored plaintext; personal details encrypted
+**users** — one row per visitor
+- id (uuid, PK), public_key (text), created_at
 
-## 5. Chat System
-- Real-time messaging per order via Supabase
-- Messages encrypted with recipient's public key before sending to DB
-- Auto-decrypted on the client when displayed — looks like a normal chat
-- Admin's public key is bundled; customer's public key is fetched from Supabase
+**orders** — encrypted customer details, plaintext status
+- id (uuid, PK), user_id (FK to users), product_id (FK to products), status (text: pending/confirmed/shipped/delivered), encrypted_details (text — PGP ciphertext of shipping info/notes), tracking_token (text, unique — for shareable status link), price_xmr (numeric), xmr_address (text), created_at
 
-## 6. Admin Panel (`/admin`)
-- Password-protected route
-- **Products**: Add, edit, remove products (plaintext in Supabase — not sensitive)
-- **Orders**: View orders, decrypt customer details with admin's private key
-- **Chat**: Real-time encrypted chat with customers, auto-decrypted in UI
+**messages** — encrypted chat per order
+- id (uuid, PK), order_id (FK to orders), encrypted_content (text — PGP ciphertext), sender (text: 'customer' or 'admin'), created_at
 
-## 7. Backend (Supabase via Lovable Cloud)
-- **Products table**: name, description, price, image — plaintext
-- **Orders table**: status (plaintext), encrypted_details (PGP ciphertext), customer public key
-- **Messages table**: order_id, encrypted_content (PGP ciphertext), sender, timestamp
-- **Users table**: entry_code, public_key
+RLS policies: open read/write for now (encryption is the security layer).
 
-## 8. Design System
+## 3. PGP Key Management
+- **Customer**: On first visit, auto-generate a PGP keypair using OpenPGP.js. Store private key in cookie, save public key to Supabase `users` table. User ID stored in cookie too.
+- **Admin**: One hardcoded admin keypair. Public key bundled in the app (used by customers to encrypt order details). Private key entered by admin on the `/admin` page and kept in memory/cookie for decryption.
+- Entry code is a separate cookie — not linked to the public key or user record.
+
+## 4. Entry Gate Screen
+- Full-screen input asking for a code on first visit
+- Code saved to cookie; on return visits, auto-skip to store
+- No relation to PGP keys — purely an access gate
+
+## 5. Store Pages & Routes
+- `/` — Entry gate (if no code cookie) or product grid
+- `/product/:id` — Product detail with info, reviews, order form
+- `/order/:token` — Shareable order status page (by tracking token)
+- `/orders` — User's orders list (looked up by user_id cookie)
+- `/how-to-buy` — Monero purchase guide
+- `/admin` — Password-protected admin panel
+
+## 6. Product Grid & Detail
+- Clean cards: product name, XMR price, placeholder image
+- Detail page: description, static sample reviews, order form
+- Order form: shipping address + notes, encrypted with admin's public key before saving
+
+## 7. Order & Payment Flow
+- Customer submits order form; details encrypted with admin public key
+- Order saved to Supabase with a unique `tracking_token`
+- Display XMR wallet address + amount to pay
+- Shareable order status link: `/order/<tracking_token>` — shows status (pending/confirmed/shipped/delivered) without exposing encrypted details
+- Customer can view their own orders at `/orders` (decrypted with their private key from cookie)
+
+## 8. Chat System
+- Per-order messaging via Supabase
+- Customer encrypts messages with admin's public key; admin encrypts with customer's public key (fetched from Supabase via user_id on the order)
+- Auto-decrypted on display — looks like normal chat
+- Supabase realtime subscription for live updates
+
+## 9. Admin Panel (`/admin`)
+- Password-protected (simple password check, stored in env/hardcoded)
+- Admin enters/pastes their PGP private key on first admin visit (stored in cookie)
+- **Products tab**: CRUD for products (plaintext)
+- **Orders tab**: List orders, decrypt customer details with admin private key, update status
+- **Chat tab**: Select an order, view/send encrypted messages
+
+## 10. Design System
 - Pure black on white, no color accents
-- Minimal typography, generous whitespace
-- Clean thin borders, no shadows
-- Monospace font for crypto/XMR addresses only
+- Minimal typography (system sans-serif), generous whitespace
+- Clean thin borders (border-black), no shadows, no rounded corners
+- Monospace font only for XMR addresses and PGP-related display
+
+## 11. File Structure
+```text
+src/
+  lib/
+    pgp.ts          — encrypt/decrypt helpers, key generation
+    cookies.ts      — cookie get/set helpers
+    admin-keys.ts   — admin public key constant
+    supabase.ts     — Supabase client (auto from Lovable Cloud)
+  pages/
+    EntryGate.tsx
+    Store.tsx
+    ProductDetail.tsx
+    OrderStatus.tsx
+    MyOrders.tsx
+    HowToBuy.tsx
+    Admin.tsx
+  components/
+    Header.tsx
+    ProductCard.tsx
+    OrderForm.tsx
+    Chat.tsx
+    AdminProducts.tsx
+    AdminOrders.tsx
+    AdminChat.tsx
+```
+
+## 12. Implementation Sequence
+1. Enable Lovable Cloud Supabase + create tables via migration
+2. Install openpgp and js-cookie
+3. Build PGP utility functions and cookie helpers
+4. Build Entry Gate page
+5. Build Store layout, product grid, and product detail
+6. Build order form with PGP encryption + payment display
+7. Build order status page with tracking token
+8. Build chat system with encryption
+9. Build admin panel with decryption
+10. Seed sample products
+11. Wire up all routes
 
