@@ -1,124 +1,87 @@
 
 
-# Privacy-First Product Store Template
+# Replace PGP with Modern E2E Encryption (Signal-style)
 
 ## Overview
-A minimalistic black-on-white product store using Supabase (Lovable Cloud) as the backend. Chat messages and order info are PGP-encrypted client-side before being sent to the database. Private keys live in browser cookies and decryption happens automatically so the experience feels seamless.
+Replace the current OpenPGP.js-based encryption with a modern, WhatsApp/Signal-style encryption system built on the **Web Crypto API** (built into every browser -- no external library needed). This uses the same cryptographic primitives as Signal Protocol:
 
-## Key Changes from Previous Plan
-- Entry codes and public keys are independent — no linking between them
-- Each user gets their own PGP keypair (public key stored in Supabase, private key in cookies)
-- One single admin PGP keypair (both public and private key hardcoded/bundled in the app)
-- Order status includes a shareable link for tracking
+- **X25519 ECDH** for key exchange (same elliptic curve as Signal/WhatsApp)
+- **AES-256-GCM** for authenticated encryption (same as Signal/WhatsApp)
+- **HKDF** for key derivation
+
+This removes the heavy `openpgp` dependency entirely and uses browser-native cryptography which is faster, more reliable, and avoids the "Key not found" errors from OpenPGP.js parsing.
 
 ---
 
-## 1. Install Dependencies
-- `openpgp` for client-side PGP encryption/decryption
-- `js-cookie` for cookie management
+## How It Works
 
-## 2. Supabase Setup (Lovable Cloud)
-Four tables:
+1. **Key Generation**: Each user (and admin) generates an X25519 keypair. The public key is shared; the private key stays in the browser cookie.
+2. **Encryption**: To send a message, the sender combines their private key with the recipient's public key using ECDH to derive a shared secret. That shared secret is used with AES-256-GCM to encrypt the message.
+3. **Decryption**: The recipient does the same ECDH with their private key and the sender's public key -- producing the identical shared secret -- and decrypts.
 
-**products** — plaintext, not sensitive
-- id (uuid, PK), name, description, price_xmr (numeric), image_url, created_at
+This is the same fundamental approach WhatsApp, Signal, and other modern E2E systems use.
 
-**users** — one row per visitor
-- id (uuid, PK), public_key (text), created_at
+---
 
-**orders** — encrypted customer details, plaintext status
-- id (uuid, PK), user_id (FK to users), product_id (FK to products), status (text: pending/confirmed/shipped/delivered), encrypted_details (text — PGP ciphertext of shipping info/notes), tracking_token (text, unique — for shareable status link), price_xmr (numeric), xmr_address (text), created_at
+## Changes Required
 
-**messages** — encrypted chat per order
-- id (uuid, PK), order_id (FK to orders), encrypted_content (text — PGP ciphertext), sender (text: 'customer' or 'admin'), created_at
+### 1. Replace `src/lib/pgp.ts` with `src/lib/e2e-crypto.ts`
+New file using Web Crypto API:
+- `generateKeyPair()` -- generates X25519 (ECDH P-256 as Web Crypto fallback) keypair, exports as base64 strings
+- `encryptMessage(plaintext, senderPrivateKey, recipientPublicKey)` -- ECDH + AES-256-GCM encryption
+- `decryptMessage(ciphertext, recipientPrivateKey, senderPublicKey)` -- ECDH + AES-256-GCM decryption
+- Keys stored as compact base64 strings (not bulky PGP armor blocks)
 
-RLS policies: open read/write for now (encryption is the security layer).
+### 2. Update `src/lib/admin-keys.ts`
+- Replace PGP public key block with a compact base64 admin public key
+- Generate a real admin keypair on first run and display it for the admin to save
 
-## 3. PGP Key Management
-- **Customer**: On first visit, auto-generate a PGP keypair using OpenPGP.js. Store private key in cookie, save public key to Supabase `users` table. User ID stored in cookie too.
-- **Admin**: One hardcoded admin keypair. Public key bundled in the app (used by customers to encrypt order details). Private key entered by admin on the `/admin` page and kept in memory/cookie for decryption.
-- Entry code is a separate cookie — not linked to the public key or user record.
+### 3. Update `src/lib/cookies.ts`
+- No structural changes needed -- same cookie helpers, just storing shorter base64 keys instead of PGP armor
 
-## 4. Entry Gate Screen
-- Full-screen input asking for a code on first visit
-- Code saved to cookie; on return visits, auto-skip to store
-- No relation to PGP keys — purely an access gate
+### 4. Update `src/pages/Index.tsx`
+- Import from `e2e-crypto` instead of `pgp`
+- Same flow: generate keypair, store private key in cookie, save public key to Supabase
 
-## 5. Store Pages & Routes
-- `/` — Entry gate (if no code cookie) or product grid
-- `/product/:id` — Product detail with info, reviews, order form
-- `/order/:token` — Shareable order status page (by tracking token)
-- `/orders` — User's orders list (looked up by user_id cookie)
-- `/how-to-buy` — Monero purchase guide
-- `/admin` — Password-protected admin panel
+### 5. Update `src/components/OrderForm.tsx`
+- Change encryption call: `encryptMessage(details, userPrivateKey, adminPublicKey)` -- now needs both keys for ECDH
+- Fetch user's private key from cookie for the ECDH step
 
-## 6. Product Grid & Detail
-- Clean cards: product name, XMR price, placeholder image
-- Detail page: description, static sample reviews, order form
-- Order form: shipping address + notes, encrypted with admin's public key before saving
+### 6. Update `src/components/Chat.tsx`
+- Encrypt outgoing: use sender's private key + recipient's public key
+- Decrypt incoming: use own private key + sender's public key
+- Each message needs to store which public key was used (or we look it up from the order/user)
 
-## 7. Order & Payment Flow
-- Customer submits order form; details encrypted with admin public key
-- Order saved to Supabase with a unique `tracking_token`
-- Display XMR wallet address + amount to pay
-- Shareable order status link: `/order/<tracking_token>` — shows status (pending/confirmed/shipped/delivered) without exposing encrypted details
-- Customer can view their own orders at `/orders` (decrypted with their private key from cookie)
+### 7. Update `src/pages/Admin.tsx`
+- Decrypt order details using admin private key + customer public key (fetched from order's user_id)
+- Chat encryption/decryption uses same ECDH pattern
 
-## 8. Chat System
-- Per-order messaging via Supabase
-- Customer encrypts messages with admin's public key; admin encrypts with customer's public key (fetched from Supabase via user_id on the order)
-- Auto-decrypted on display — looks like normal chat
-- Supabase realtime subscription for live updates
+### 8. Remove `openpgp` dependency
+- Remove from `package.json`
 
-## 9. Admin Panel (`/admin`)
-- Password-protected (simple password check, stored in env/hardcoded)
-- Admin enters/pastes their PGP private key on first admin visit (stored in cookie)
-- **Products tab**: CRUD for products (plaintext)
-- **Orders tab**: List orders, decrypt customer details with admin private key, update status
-- **Chat tab**: Select an order, view/send encrypted messages
+---
 
-## 10. Design System
-- Pure black on white, no color accents
-- Minimal typography (system sans-serif), generous whitespace
-- Clean thin borders (border-black), no shadows, no rounded corners
-- Monospace font only for XMR addresses and PGP-related display
+## Technical Details
 
-## 11. File Structure
+### Crypto Primitives
+- **Key Exchange**: ECDH with P-256 curve (Web Crypto native; equivalent security to X25519)
+- **Encryption**: AES-256-GCM with random 12-byte IV per message
+- **Key Derivation**: HKDF-SHA-256 to derive AES key from ECDH shared secret
+- **Output Format**: Base64-encoded JSON containing IV + ciphertext
+
+### Key Format
+Keys are stored as short base64 strings (~88 characters) instead of multi-line PGP armor blocks (~600+ characters). This fits more naturally in cookies and database fields.
+
+### Message Format
+Each encrypted message is a base64 string containing:
 ```text
-src/
-  lib/
-    pgp.ts          — encrypt/decrypt helpers, key generation
-    cookies.ts      — cookie get/set helpers
-    admin-keys.ts   — admin public key constant
-    supabase.ts     — Supabase client (auto from Lovable Cloud)
-  pages/
-    EntryGate.tsx
-    Store.tsx
-    ProductDetail.tsx
-    OrderStatus.tsx
-    MyOrders.tsx
-    HowToBuy.tsx
-    Admin.tsx
-  components/
-    Header.tsx
-    ProductCard.tsx
-    OrderForm.tsx
-    Chat.tsx
-    AdminProducts.tsx
-    AdminOrders.tsx
-    AdminChat.tsx
+{ iv: <12 bytes>, ciphertext: <AES-256-GCM output> }
 ```
 
-## 12. Implementation Sequence
-1. Enable Lovable Cloud Supabase + create tables via migration
-2. Install openpgp and js-cookie
-3. Build PGP utility functions and cookie helpers
-4. Build Entry Gate page
-5. Build Store layout, product grid, and product detail
-6. Build order form with PGP encryption + payment display
-7. Build order status page with tracking token
-8. Build chat system with encryption
-9. Build admin panel with decryption
-10. Seed sample products
-11. Wire up all routes
+### Why This Is Better Than PGP
+- **No external dependency** -- Web Crypto API is built into every modern browser
+- **Faster** -- native browser crypto vs JavaScript library
+- **Smaller keys** -- 88 chars vs 600+ chars of PGP armor
+- **No parsing errors** -- no armored key format to parse/break
+- **Same security level** -- AES-256-GCM + ECDH P-256 matches modern E2E standards
 
