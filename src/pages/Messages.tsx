@@ -56,22 +56,28 @@ const Messages = () => {
     if (!user) return;
 
     const initKeys = async () => {
-      // Check if user already has a users row linked to their auth account
-      let currentUserId = getUserId();
-
-      if (!currentUserId) {
-        // Check DB for existing user row with this auth_id
+      // The user already has a users row + keypair from Index page init.
+      // We just need to link it to their auth account if not already linked.
+      const currentUserId = getUserId();
+      
+      if (currentUserId) {
+        // Link existing user row to auth account
+        await supabase
+          .from('users')
+          .update({ auth_id: user.id } as any)
+          .eq('id', currentUserId);
+      } else {
+        // Edge case: no cookie but logged in - check DB for existing row
         const { data: existingUser } = await supabase
           .from('users')
-          .select('id')
+          .select('id, public_key')
           .eq('auth_id', user.id)
           .maybeSingle();
 
         if (existingUser) {
           setUserId(existingUser.id);
-          currentUserId = existingUser.id;
         } else {
-          // Create new keypair and user row
+          // Create new keypair
           const { publicKey, privateKey } = await generateKeyPair();
           setPrivateKey(privateKey);
           const { data } = await supabase
@@ -79,10 +85,7 @@ const Messages = () => {
             .insert({ public_key: publicKey, auth_id: user.id } as any)
             .select('id')
             .single();
-          if (data) {
-            setUserId(data.id);
-            currentUserId = data.id;
-          }
+          if (data) setUserId(data.id);
         }
       }
       setReady(true);

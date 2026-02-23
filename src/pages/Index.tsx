@@ -1,18 +1,14 @@
 import { useState, useEffect } from 'react';
-import { getEntryCode, getUserId, setUserId, getPrivateKey, setPrivateKey } from '@/lib/cookies';
+import { getUserId, setUserId, getPrivateKey, setPrivateKey } from '@/lib/cookies';
 import { generateKeyPair } from '@/lib/e2e-crypto';
 import { supabase } from '@/integrations/supabase/client';
-import EntryGate from './EntryGate';
 import Store from './Store';
 
 const Index = () => {
-  const [hasCode, setHasCode] = useState(!!getEntryCode());
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!hasCode) return;
-    
     const initUser = async () => {
       try {
         if (!getUserId()) {
@@ -42,11 +38,7 @@ const Index = () => {
     };
     
     initUser();
-  }, [hasCode]);
-
-  if (!hasCode) {
-    return <EntryGate onEnter={() => setHasCode(true)} />;
-  }
+  }, []);
 
   if (error) {
     return (
