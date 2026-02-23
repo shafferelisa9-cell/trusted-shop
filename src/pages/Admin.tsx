@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { decryptMessage, encryptMessage } from '@/lib/pgp';
-import { ADMIN_PASSWORD } from '@/lib/admin-keys';
+import { decryptMessage } from '@/lib/e2e-crypto';
+import { generateKeyPair } from '@/lib/e2e-crypto';
+import { ADMIN_PASSWORD, setAdminPublicKey, getAdminPublicKey } from '@/lib/admin-keys';
 import { getAdminAuth, setAdminAuth, getAdminPrivateKey, setAdminPrivateKey } from '@/lib/cookies';
 import Chat from '@/components/Chat';
 
 const Admin = () => {
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState('');
-  const [privateKey, setPrivateKeyInput] = useState('');
+  const [privateKeyInput, setPrivateKeyInput] = useState('');
   const [hasKey, setHasKey] = useState(false);
   const [tab, setTab] = useState<'products' | 'orders' | 'chat'>('products');
+  const [generatedKeys, setGeneratedKeys] = useState<{ publicKey: string; privateKey: string } | null>(null);
 
   // Products state
   const [products, setProducts] = useState<any[]>([]);
@@ -20,7 +22,6 @@ const Admin = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [decryptedDetails, setDecryptedDetails] = useState<Record<string, string>>({});
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-  const [selectedOrderUserId, setSelectedOrderUserId] = useState<string | null>(null);
   const [customerPubKey, setCustomerPubKey] = useState<string>('');
 
   useEffect(() => {
@@ -43,9 +44,24 @@ const Admin = () => {
     }
   };
 
+  const handleGenerateKeys = async () => {
+    const keys = await generateKeyPair();
+    setGeneratedKeys(keys);
+  };
+
   const handleKeySubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setAdminPrivateKey(privateKey);
+    const keyToSave = generatedKeys ? generatedKeys.privateKey : privateKeyInput;
+    setAdminPrivateKey(keyToSave);
+    if (generatedKeys) {
+      setAdminPublicKey(generatedKeys.publicKey);
+    }
+    setHasKey(true);
+  };
+
+  const handleImportKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminPrivateKey(privateKeyInput);
     setHasKey(true);
   };
 
@@ -71,10 +87,10 @@ const Admin = () => {
     fetchProducts();
   };
 
-  const decryptOrder = async (orderId: string, encrypted: string) => {
+  const decryptOrder = async (orderId: string, encrypted: string, customerPubKeyStr: string) => {
     const key = getAdminPrivateKey();
     if (!key) return;
-    const decrypted = await decryptMessage(encrypted, key);
+    const decrypted = await decryptMessage(encrypted, key, customerPubKeyStr);
     setDecryptedDetails((prev) => ({ ...prev, [orderId]: decrypted }));
   };
 
@@ -85,9 +101,9 @@ const Admin = () => {
 
   const openChat = async (orderId: string, userId: string) => {
     setSelectedOrderId(orderId);
-    setSelectedOrderUserId(userId);
     const { data } = await supabase.from('users').select('public_key').eq('id', userId).single();
     if (data) setCustomerPubKey(data.public_key);
+    setTab('chat');
   };
 
   if (!authed) {
@@ -113,18 +129,55 @@ const Admin = () => {
   if (!hasKey) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <form onSubmit={handleKeySubmit} className="w-full max-w-lg px-6">
-          <h1 className="text-sm font-medium mb-8 text-center tracking-widest">ENTER ADMIN PRIVATE KEY</h1>
-          <textarea
-            value={privateKey}
-            onChange={(e) => setPrivateKeyInput(e.target.value)}
-            className="w-full border border-foreground bg-background p-4 text-xs font-mono resize-none h-48 focus:outline-none"
-            placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"
-          />
-          <button type="submit" className="w-full border border-foreground mt-4 py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">
-            SAVE KEY
-          </button>
-        </form>
+        <div className="w-full max-w-lg px-6 space-y-6">
+          <h1 className="text-sm font-medium mb-4 text-center tracking-widest">SETUP ENCRYPTION KEYS</h1>
+          
+          {!generatedKeys ? (
+            <div className="space-y-4">
+              <button
+                onClick={handleGenerateKeys}
+                className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors"
+              >
+                GENERATE NEW KEYPAIR
+              </button>
+              <div className="text-center text-xs opacity-40">— OR —</div>
+              <form onSubmit={handleImportKey} className="space-y-4">
+                <textarea
+                  value={privateKeyInput}
+                  onChange={(e) => setPrivateKeyInput(e.target.value)}
+                  className="w-full border border-foreground bg-background p-4 text-xs font-mono resize-none h-32 focus:outline-none"
+                  placeholder="Paste existing private key (JWK JSON)..."
+                />
+                <button type="submit" className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">
+                  IMPORT KEY
+                </button>
+              </form>
+            </div>
+          ) : (
+            <form onSubmit={handleKeySubmit} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs block">PUBLIC KEY (share with customers — saved automatically)</label>
+                <textarea
+                  readOnly
+                  value={generatedKeys.publicKey}
+                  className="w-full border border-foreground bg-muted p-3 text-xs font-mono resize-none h-16 focus:outline-none"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs block">PRIVATE KEY (save this securely — stored in browser)</label>
+                <textarea
+                  readOnly
+                  value={generatedKeys.privateKey}
+                  className="w-full border border-foreground bg-muted p-3 text-xs font-mono resize-none h-32 focus:outline-none"
+                />
+              </div>
+              <p className="text-xs opacity-60">⚠ Copy and save your private key somewhere safe. If you lose it, you cannot decrypt orders.</p>
+              <button type="submit" className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">
+                SAVE & CONTINUE
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     );
   }
@@ -171,30 +224,33 @@ const Admin = () => {
 
         {tab === 'orders' && (
           <div className="space-y-4">
-            {orders.map((o) => (
-              <div key={o.id} className="border border-foreground p-4 space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span>{(o as any).products?.name || 'Product'} — <span className="font-mono">{o.price_xmr} XMR</span></span>
-                  <span className="uppercase text-xs border border-foreground px-2 py-1">{o.status}</span>
+            {orders.map((o) => {
+              const custKey = (o as any).users?.public_key || '';
+              return (
+                <div key={o.id} className="border border-foreground p-4 space-y-3">
+                  <div className="flex justify-between text-sm">
+                    <span>{(o as any).products?.name || 'Product'} — <span className="font-mono">{o.price_xmr} XMR</span></span>
+                    <span className="uppercase text-xs border border-foreground px-2 py-1">{o.status}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    {['pending', 'confirmed', 'shipped', 'delivered'].map((s) => (
+                      <button key={s} onClick={() => updateStatus(o.id, s)} className={`text-xs border border-foreground px-2 py-1 ${o.status === s ? 'bg-foreground text-background' : 'hover:bg-foreground hover:text-background'} transition-colors`}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => decryptOrder(o.id, o.encrypted_details, custKey)} className="text-xs underline hover:opacity-60">
+                    Decrypt details
+                  </button>
+                  {decryptedDetails[o.id] && (
+                    <pre className="text-xs font-mono bg-muted p-3 whitespace-pre-wrap">{decryptedDetails[o.id]}</pre>
+                  )}
+                  <button onClick={() => openChat(o.id, o.user_id)} className="text-xs underline hover:opacity-60 block">
+                    Open chat
+                  </button>
                 </div>
-                <div className="flex gap-2">
-                  {['pending', 'confirmed', 'shipped', 'delivered'].map((s) => (
-                    <button key={s} onClick={() => updateStatus(o.id, s)} className={`text-xs border border-foreground px-2 py-1 ${o.status === s ? 'bg-foreground text-background' : 'hover:bg-foreground hover:text-background'} transition-colors`}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                <button onClick={() => decryptOrder(o.id, o.encrypted_details)} className="text-xs underline hover:opacity-60">
-                  Decrypt details
-                </button>
-                {decryptedDetails[o.id] && (
-                  <pre className="text-xs font-mono bg-muted p-3 whitespace-pre-wrap">{decryptedDetails[o.id]}</pre>
-                )}
-                <button onClick={() => openChat(o.id, o.user_id)} className="text-xs underline hover:opacity-60 block">
-                  Open chat
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

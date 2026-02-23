@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getEntryCode, getUserId, setUserId, getPrivateKey, setPrivateKey } from '@/lib/cookies';
-import { generateKeyPair } from '@/lib/pgp';
+import { generateKeyPair } from '@/lib/e2e-crypto';
 import { supabase } from '@/integrations/supabase/client';
 import EntryGate from './EntryGate';
 import Store from './Store';
@@ -16,7 +16,7 @@ const Index = () => {
     const initUser = async () => {
       try {
         if (!getUserId()) {
-          console.log('Generating PGP keypair...');
+          console.log('Generating ECDH keypair...');
           const { publicKey, privateKey } = await generateKeyPair();
           console.log('Keypair generated, saving...');
           setPrivateKey(privateKey);
