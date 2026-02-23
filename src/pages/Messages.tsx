@@ -6,6 +6,7 @@ import { encryptMessage, decryptMessage, generateKeyPair } from '@/lib/e2e-crypt
 import { getPrivateKey, setPrivateKey, getUserId, setUserId } from '@/lib/cookies';
 import { getAdminPublicKey } from '@/lib/admin-keys';
 import { Link } from 'react-router-dom';
+import { toast } from '@/hooks/use-toast';
 
 interface Msg {
   id: string;
@@ -115,15 +116,21 @@ const Messages = () => {
     setSending(true);
     try {
       const encrypted = await encryptMessage(input, privateKey, adminPubKey);
-      await supabase.from('messages').insert({
+      const { error } = await supabase.from('messages').insert({
         order_id: userId,
         encrypted_content: encrypted,
         sender: 'customer',
       });
+      if (error) {
+        console.error('Message insert error:', error);
+        toast({ title: 'Failed to send', description: error.message, variant: 'destructive' });
+        return;
+      }
       setInput('');
       fetchMessages();
     } catch (err) {
       console.error('Send failed:', err);
+      toast({ title: 'Failed to send', description: 'Encryption or network error', variant: 'destructive' });
     } finally {
       setSending(false);
     }

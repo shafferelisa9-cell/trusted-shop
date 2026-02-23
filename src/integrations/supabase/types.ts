@@ -54,15 +54,7 @@ export type Database = {
           order_id?: string
           sender?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "messages_order_id_fkey"
-            columns: ["order_id"]
-            isOneToOne: false
-            referencedRelation: "orders"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       orders: {
         Row: {
