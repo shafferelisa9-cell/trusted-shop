@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { encryptMessage } from '@/lib/pgp';
-import { ADMIN_PUBLIC_KEY } from '@/lib/admin-keys';
-import { getUserId } from '@/lib/cookies';
+import { encryptMessage } from '@/lib/e2e-crypto';
+import { getAdminPublicKey } from '@/lib/admin-keys';
+import { getUserId, getPrivateKey } from '@/lib/cookies';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Product = Tables<'products'>;
@@ -15,19 +15,28 @@ const OrderForm = ({ product }: { product: Product }) => {
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [trackingToken, setTrackingToken] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const userId = getUserId();
-    if (!userId) return;
+    const privateKey = getPrivateKey();
+    const adminPubKey = getAdminPublicKey();
+
+    if (!userId || !privateKey) return;
+    if (!adminPubKey) {
+      setError('Admin has not configured encryption keys yet. Please try again later.');
+      return;
+    }
 
     setSubmitting(true);
+    setError(null);
     try {
       const details = JSON.stringify({ address, notes });
-      const encrypted = await encryptMessage(details, ADMIN_PUBLIC_KEY);
+      const encrypted = await encryptMessage(details, privateKey, adminPubKey);
 
-      const { data, error } = await supabase
+      const { data, error: dbErr } = await supabase
         .from('orders')
         .insert({
           user_id: userId,
@@ -39,10 +48,11 @@ const OrderForm = ({ product }: { product: Product }) => {
         .select('tracking_token')
         .single();
 
-      if (error) throw error;
+      if (dbErr) throw dbErr;
       setTrackingToken(data.tracking_token);
     } catch (err) {
       console.error('Order failed:', err);
+      setError('Failed to place order.');
     } finally {
       setSubmitting(false);
     }
@@ -74,6 +84,7 @@ const OrderForm = ({ product }: { product: Product }) => {
   return (
     <form onSubmit={handleSubmit} className="border border-foreground p-6 space-y-4">
       <h3 className="text-sm font-medium">PLACE ORDER</h3>
+      {error && <p className="text-xs text-destructive">{error}</p>}
       <div className="space-y-2">
         <label className="text-xs block">SHIPPING ADDRESS</label>
         <textarea
@@ -98,7 +109,7 @@ const OrderForm = ({ product }: { product: Product }) => {
       >
         {submitting ? 'ENCRYPTING & SUBMITTING...' : 'SUBMIT ORDER'}
       </button>
-      <p className="text-xs opacity-60">Your details are PGP-encrypted before leaving your browser.</p>
+      <p className="text-xs opacity-60">Your details are E2E-encrypted before leaving your browser.</p>
     </form>
   );
 };
