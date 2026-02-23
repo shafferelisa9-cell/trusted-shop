@@ -57,18 +57,26 @@ const Messages = () => {
     if (!user) return;
 
     const initKeys = async () => {
-      // The user already has a users row + keypair from Index page init.
-      // We just need to link it to their auth account if not already linked.
       const currentUserId = getUserId();
+      const currentPrivateKey = getPrivateKey();
       
-      if (currentUserId) {
-        // Link existing user row to auth account
+      if (currentUserId && currentPrivateKey) {
+        // We have both userId and privateKey — link auth account
         await supabase
           .from('users')
           .update({ auth_id: user.id } as any)
           .eq('id', currentUserId);
+      } else if (currentUserId && !currentPrivateKey) {
+        // userId cookie exists but no private key — keys were lost.
+        // Generate new keypair and update the DB record.
+        const { publicKey, privateKey } = await generateKeyPair();
+        setPrivateKey(privateKey);
+        await supabase
+          .from('users')
+          .update({ public_key: publicKey, auth_id: user.id } as any)
+          .eq('id', currentUserId);
       } else {
-        // Edge case: no cookie but logged in - check DB for existing row
+        // No userId cookie — check DB for existing row linked to auth
         const { data: existingUser } = await supabase
           .from('users')
           .select('id, public_key')
@@ -77,8 +85,17 @@ const Messages = () => {
 
         if (existingUser) {
           setUserId(existingUser.id);
+          // No private key available — regenerate keypair
+          if (!getPrivateKey()) {
+            const { publicKey, privateKey } = await generateKeyPair();
+            setPrivateKey(privateKey);
+            await supabase
+              .from('users')
+              .update({ public_key: publicKey } as any)
+              .eq('id', existingUser.id);
+          }
         } else {
-          // Create new keypair
+          // Create new user + keypair
           const { publicKey, privateKey } = await generateKeyPair();
           setPrivateKey(privateKey);
           const { data } = await supabase
@@ -111,7 +128,11 @@ const Messages = () => {
     const privateKey = getPrivateKey();
     const adminPubKey = await getAdminPublicKey();
     const userId = getUserId();
-    if (!privateKey || !adminPubKey || !userId) return;
+    if (!privateKey || !adminPubKey || !userId) {
+      console.error('Missing keys:', { privateKey: !!privateKey, adminPubKey: !!adminPubKey, userId: !!userId });
+      toast({ title: 'Encryption not ready', description: 'Please refresh the page and try again.', variant: 'destructive' });
+      return;
+    }
 
     setSending(true);
     try {
