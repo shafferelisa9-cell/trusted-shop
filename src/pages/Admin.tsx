@@ -18,6 +18,8 @@ const Admin = () => {
   // Products
   const [products, setProducts] = useState<any[]>([]);
   const [newProduct, setNewProduct] = useState({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg' });
+  const [newImageFile, setNewImageFile] = useState<File | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
   const [editPrice, setEditPrice] = useState(0);
 
@@ -75,11 +77,45 @@ const Admin = () => {
     if (data) setProducts(data);
   };
 
+  const uploadImage = async (file: File): Promise<string> => {
+    const ext = file.name.split('.').pop();
+    const path = `${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from('product-images').upload(path, file);
+    if (error) throw error;
+    const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(path);
+    return urlData.publicUrl;
+  };
+
   const addProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    await supabase.from('products').insert(newProduct);
-    setNewProduct({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg' });
-    fetchProducts();
+    setUploadingImage(true);
+    try {
+      let imageUrl = newProduct.image_url;
+      if (newImageFile) {
+        imageUrl = await uploadImage(newImageFile);
+      }
+      await supabase.from('products').insert({ ...newProduct, image_url: imageUrl });
+      setNewProduct({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg' });
+      setNewImageFile(null);
+      fetchProducts();
+    } catch (err) {
+      console.error('Add product failed:', err);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const changeProductImage = async (productId: string, file: File) => {
+    setUploadingImage(true);
+    try {
+      const imageUrl = await uploadImage(file);
+      await supabase.from('products').update({ image_url: imageUrl }).eq('id', productId);
+      fetchProducts();
+    } catch (err) {
+      console.error('Image change failed:', err);
+    } finally {
+      setUploadingImage(false);
+    }
   };
 
   const deleteProduct = async (id: string) => {
@@ -303,17 +339,40 @@ const Admin = () => {
               <h2 className="text-xs font-medium tracking-widest">ADD PRODUCT</h2>
               <input value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} placeholder="Name" className="w-full border border-foreground bg-background px-4 py-2 text-sm focus:outline-none" required />
               <textarea value={newProduct.description} onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })} placeholder="Description" className="w-full border border-foreground bg-background px-4 py-2 text-sm resize-none h-20 focus:outline-none" />
-              <input value={newProduct.image_url} onChange={(e) => setNewProduct({ ...newProduct, image_url: e.target.value })} placeholder="Image URL" className="w-full border border-foreground bg-background px-4 py-2 text-sm focus:outline-none" />
+              <div className="space-y-1">
+                <label className="text-xs opacity-60">Product Image</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setNewImageFile(e.target.files?.[0] || null)}
+                  className="w-full border border-foreground bg-background px-4 py-2 text-sm focus:outline-none file:border-0 file:bg-transparent file:text-sm file:font-medium"
+                />
+                {newImageFile && <p className="text-xs opacity-60">Selected: {newImageFile.name}</p>}
+              </div>
               <input type="number" step="0.001" value={newProduct.price_xmr} onChange={(e) => setNewProduct({ ...newProduct, price_xmr: parseFloat(e.target.value) })} placeholder="Price (XMR)" className="w-full border border-foreground bg-background px-4 py-2 text-sm focus:outline-none" />
-              <button type="submit" className="border border-foreground px-6 py-2 text-sm hover:bg-foreground hover:text-background transition-colors">ADD PRODUCT</button>
+              <button type="submit" disabled={uploadingImage} className="border border-foreground px-6 py-2 text-sm hover:bg-foreground hover:text-background transition-colors disabled:opacity-40">
+                {uploadingImage ? 'UPLOADING...' : 'ADD PRODUCT'}
+              </button>
             </form>
 
             <div className="space-y-px border border-foreground">
               {products.map((p) => (
                 <div key={p.id} className="p-4 border-b border-foreground last:border-b-0">
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-muted border border-foreground flex-shrink-0">
+                    <div className="w-12 h-12 bg-muted border border-foreground flex-shrink-0 relative group cursor-pointer">
                       <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                      <label className="absolute inset-0 bg-foreground/80 text-background text-[8px] font-medium flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                        CHANGE
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) changeProductImage(p.id, file);
+                          }}
+                        />
+                      </label>
                     </div>
                     <div className="flex-1 flex items-center justify-between">
                       <div className="text-sm">
