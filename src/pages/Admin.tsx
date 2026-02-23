@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { decryptMessage, encryptMessage, generateKeyPair } from '@/lib/e2e-crypto';
 import { getAdminPrivateKey, setAdminPrivateKey } from '@/lib/cookies';
-import { setAdminPublicKey } from '@/lib/admin-keys';
+import { setAdminPublicKey, getAdminPublicKey } from '@/lib/admin-keys';
 import Header from '@/components/Header';
 
 const Admin = () => {
@@ -141,10 +141,12 @@ const Admin = () => {
     }
   };
 
-  const decryptOrder = async (orderId: string, encrypted: string, customerPubKey: string) => {
+  const decryptOrder = async (orderId: string, encrypted: string, customerPubKey: string, orderSenderPubKey?: string) => {
     const key = getAdminPrivateKey();
     if (!key) return;
-    const decrypted = await decryptMessage(encrypted, key, customerPubKey);
+    // Use the sender's public key stored at order creation time, fallback to current DB key
+    const pubKey = orderSenderPubKey || customerPubKey;
+    const decrypted = await decryptMessage(encrypted, key, pubKey);
     setDecryptedDetails((prev) => ({ ...prev, [orderId]: decrypted }));
   };
 
@@ -190,11 +192,20 @@ const Admin = () => {
       const { data: userData } = await supabase.from('users').select('public_key').eq('id', threadId).single();
       const custPubKey = userData?.public_key;
 
-      if (adminKey && custPubKey) {
+      if (adminKey) {
         const decrypted = await Promise.all(
           data.map(async (msg: any) => {
             try {
-              const d = await decryptMessage(msg.encrypted_content, adminKey, custPubKey);
+              let pubKeyForDecrypt: string | null;
+              if (msg.sender === 'customer') {
+                // Use sender_public_key stored at send time, fallback to current DB key
+                pubKeyForDecrypt = msg.sender_public_key || custPubKey || null;
+              } else {
+                // Admin's own messages: need customer pub key to derive same shared secret
+                pubKeyForDecrypt = custPubKey || null;
+              }
+              if (!pubKeyForDecrypt) return { ...msg, decrypted: '[missing key]' };
+              const d = await decryptMessage(msg.encrypted_content, adminKey, pubKeyForDecrypt);
               return { ...msg, decrypted: d };
             } catch {
               return { ...msg, decrypted: '[unable to decrypt]' };
@@ -217,11 +228,16 @@ const Admin = () => {
       if (!adminKey || !userData?.public_key) return;
 
       const encrypted = await encryptMessage(replyInput, adminKey, userData.public_key);
+
+      // Get admin's public key to store with message
+      const adminPubKey = await getAdminPublicKey();
+
       await supabase.from('messages').insert({
         order_id: selectedThread,
         encrypted_content: encrypted,
         sender: 'admin',
-      });
+        sender_public_key: adminPubKey,
+      } as any);
 
       setReplyInput('');
       openThread(selectedThread);
@@ -429,8 +445,8 @@ const Admin = () => {
                       </button>
                     ))}
                   </div>
-                  {custKey && !decryptedDetails[o.id] && (
-                    <button onClick={() => decryptOrder(o.id, o.encrypted_details, custKey)} className="text-xs underline hover:opacity-60">
+                  {(custKey || (o as any).sender_public_key) && !decryptedDetails[o.id] && (
+                    <button onClick={() => decryptOrder(o.id, o.encrypted_details, custKey, (o as any).sender_public_key)} className="text-xs underline hover:opacity-60">
                       Decrypt details
                     </button>
                   )}

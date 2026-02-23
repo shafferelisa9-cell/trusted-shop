@@ -13,6 +13,7 @@ interface Msg {
   content: string;
   sender: string;
   created_at: string;
+  sender_public_key?: string;
   decrypted?: string;
 }
 
@@ -35,11 +36,20 @@ const Messages = () => {
     if (data) {
       const privateKey = getPrivateKey();
       const adminPubKey = await getAdminPublicKey();
-      if (privateKey && adminPubKey) {
+      if (privateKey) {
         const decrypted = await Promise.all(
           data.map(async (msg: any) => {
             try {
-              const d = await decryptMessage(msg.encrypted_content, privateKey, adminPubKey);
+              // For customer messages: decrypt with customer_private + admin_pub
+              // For admin messages: use sender_public_key if available, fallback to admin_pub
+              let pubKeyForDecrypt: string | null;
+              if (msg.sender === 'admin') {
+                pubKeyForDecrypt = msg.sender_public_key || adminPubKey;
+              } else {
+                pubKeyForDecrypt = adminPubKey;
+              }
+              if (!pubKeyForDecrypt) return { ...msg, decrypted: '[admin key not set]' };
+              const d = await decryptMessage(msg.encrypted_content, privateKey, pubKeyForDecrypt);
               return { ...msg, decrypted: d };
             } catch {
               return { ...msg, decrypted: '[encrypted]' };
@@ -61,14 +71,11 @@ const Messages = () => {
       const currentPrivateKey = getPrivateKey();
       
       if (currentUserId && currentPrivateKey) {
-        // We have both userId and privateKey — link auth account
         await supabase
           .from('users')
           .update({ auth_id: user.id } as any)
           .eq('id', currentUserId);
       } else if (currentUserId && !currentPrivateKey) {
-        // userId cookie exists but no private key — keys were lost.
-        // Generate new keypair and update the DB record.
         const { publicKey, privateKey } = await generateKeyPair();
         setPrivateKey(privateKey);
         await supabase
@@ -76,7 +83,6 @@ const Messages = () => {
           .update({ public_key: publicKey, auth_id: user.id } as any)
           .eq('id', currentUserId);
       } else {
-        // No userId cookie — check DB for existing row linked to auth
         const { data: existingUser } = await supabase
           .from('users')
           .select('id, public_key')
@@ -85,7 +91,6 @@ const Messages = () => {
 
         if (existingUser) {
           setUserId(existingUser.id);
-          // No private key available — regenerate keypair
           if (!getPrivateKey()) {
             const { publicKey, privateKey } = await generateKeyPair();
             setPrivateKey(privateKey);
@@ -95,7 +100,6 @@ const Messages = () => {
               .eq('id', existingUser.id);
           }
         } else {
-          // Create new user + keypair
           const { publicKey, privateKey } = await generateKeyPair();
           setPrivateKey(privateKey);
           const { data } = await supabase
@@ -129,10 +133,13 @@ const Messages = () => {
     const adminPubKey = await getAdminPublicKey();
     const userId = getUserId();
     if (!privateKey || !adminPubKey || !userId) {
-      console.error('Missing keys:', { privateKey: !!privateKey, adminPubKey: !!adminPubKey, userId: !!userId });
       toast({ title: 'Encryption not ready', description: 'Please refresh the page and try again.', variant: 'destructive' });
       return;
     }
+
+    // Get customer's own public key to store with message
+    const { data: userData } = await supabase.from('users').select('public_key').eq('id', userId).single();
+    const myPublicKey = userData?.public_key;
 
     setSending(true);
     try {
@@ -141,9 +148,9 @@ const Messages = () => {
         order_id: userId,
         encrypted_content: encrypted,
         sender: 'customer',
-      });
+        sender_public_key: myPublicKey || null,
+      } as any);
       if (error) {
-        console.error('Message insert error:', error);
         toast({ title: 'Failed to send', description: error.message, variant: 'destructive' });
         return;
       }

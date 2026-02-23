@@ -10,7 +10,7 @@ const Header = () => {
     <header className="border-b border-foreground">
       <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
         <Link to="/" className="text-lg font-medium tracking-tight">
-          STORE
+          NAGSOM
         </Link>
         <nav className="flex gap-6 text-sm items-center">
           <Link to="/" className="hover:opacity-60 transition-opacity">Products</Link>

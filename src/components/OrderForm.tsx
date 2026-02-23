@@ -36,6 +36,10 @@ const OrderForm = ({ product }: { product: Product }) => {
       const details = JSON.stringify({ address, notes });
       const encrypted = await encryptMessage(details, privateKey, adminPubKey);
 
+      // Get customer's current public key to store with order for future decryption
+      const { data: userData } = await supabase.from('users').select('public_key').eq('id', userId).single();
+      const customerPubKey = userData?.public_key || null;
+
       const { data, error: dbErr } = await supabase
         .from('orders')
         .insert({
@@ -44,7 +48,8 @@ const OrderForm = ({ product }: { product: Product }) => {
           encrypted_details: encrypted,
           price_xmr: product.price_xmr,
           xmr_address: XMR_ADDRESS,
-        })
+          sender_public_key: customerPubKey,
+        } as any)
         .select('tracking_token')
         .single();
 

@@ -39,6 +39,7 @@ export type Database = {
           id: string
           order_id: string
           sender: string
+          sender_public_key: string | null
         }
         Insert: {
           created_at?: string
@@ -46,6 +47,7 @@ export type Database = {
           id?: string
           order_id: string
           sender?: string
+          sender_public_key?: string | null
         }
         Update: {
           created_at?: string
@@ -53,6 +55,7 @@ export type Database = {
           id?: string
           order_id?: string
           sender?: string
+          sender_public_key?: string | null
         }
         Relationships: []
       }
@@ -63,6 +66,7 @@ export type Database = {
           id: string
           price_xmr: number
           product_id: string
+          sender_public_key: string | null
           status: string
           tracking_token: string
           user_id: string
@@ -74,6 +78,7 @@ export type Database = {
           id?: string
           price_xmr?: number
           product_id: string
+          sender_public_key?: string | null
           status?: string
           tracking_token?: string
           user_id: string
@@ -85,6 +90,7 @@ export type Database = {
           id?: string
           price_xmr?: number
           product_id?: string
+          sender_public_key?: string | null
           status?: string
           tracking_token?: string
           user_id?: string
