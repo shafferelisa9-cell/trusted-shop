@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { encryptMessage, decryptMessage } from '@/lib/e2e-crypto';
 import { getAdminPublicKey } from '@/lib/admin-keys';
@@ -23,10 +23,19 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  // Cache the admin public key for the lifetime of this component
+  const adminPubKeyRef = useRef<string | null>(null);
 
-  const decryptAll = async (msgs: Message[]) => {
+  const getAdminPubKeyCached = useCallback(async () => {
+    if (!adminPubKeyRef.current) {
+      adminPubKeyRef.current = await getAdminPublicKey();
+    }
+    return adminPubKeyRef.current;
+  }, []);
+
+  const decryptAll = useCallback(async (msgs: Message[]) => {
     const privateKey = isAdmin ? getAdminPrivateKey() : getPrivateKey();
-    const adminPubKey = await getAdminPublicKey();
+    const adminPubKey = await getAdminPubKeyCached();
     if (!privateKey) return msgs;
 
     return Promise.all(
@@ -34,15 +43,16 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
         try {
           let pubKeyForDecrypt: string | null = null;
           if (isAdmin) {
-            // Admin decrypting: customer msgs use sender_public_key, admin msgs use admin's own key (self)
+            // Admin decrypting customer messages: use sender_public_key stored at send time
+            // Admin decrypting own messages: need customer pub key (same ECDH shared secret)
             if (msg.sender === 'customer') {
               pubKeyForDecrypt = msg.sender_public_key || customerPublicKey || null;
             } else {
-              // Admin's own messages - need customer pub key to derive same shared secret
               pubKeyForDecrypt = customerPublicKey || null;
             }
           } else {
-            // Customer decrypting: admin msgs use sender_public_key, customer msgs use admin pub
+            // Customer decrypting admin messages: use sender_public_key (admin's pub key at send time)
+            // Customer decrypting own messages: use admin pub key (same ECDH shared secret)
             if (msg.sender === 'admin') {
               pubKeyForDecrypt = msg.sender_public_key || adminPubKey;
             } else {
@@ -57,9 +67,9 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
         }
       })
     );
-  };
+  }, [isAdmin, customerPublicKey, getAdminPubKeyCached]);
 
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback(async () => {
     const { data } = await supabase
       .from('messages')
       .select('*')
@@ -70,7 +80,7 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
       const decrypted = await decryptAll(data);
       setMessages(decrypted);
     }
-  };
+  }, [orderId, decryptAll]);
 
   useEffect(() => {
     fetchMessages();
@@ -88,7 +98,7 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [orderId]);
+  }, [orderId, fetchMessages]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -96,7 +106,7 @@ const Chat = ({ orderId, isAdmin = false, customerPublicKey }: ChatProps) => {
 
     try {
       const privateKey = isAdmin ? getAdminPrivateKey() : getPrivateKey();
-      const adminPubKey = await getAdminPublicKey();
+      const adminPubKey = await getAdminPubKeyCached();
       const counterpartPublicKey = isAdmin ? customerPublicKey : adminPubKey;
       if (!privateKey || !counterpartPublicKey) throw new Error('Missing keys');
 

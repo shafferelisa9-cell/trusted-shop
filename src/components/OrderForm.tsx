@@ -24,7 +24,10 @@ const OrderForm = ({ product }: { product: Product }) => {
     const privateKey = getPrivateKey();
     const adminPubKey = await getAdminPublicKey();
 
-    if (!userId || !privateKey) return;
+    if (!userId || !privateKey) {
+      setError('Encryption keys not ready. Please visit the Messages page first to initialize your keys, then try again.');
+      return;
+    }
     if (!adminPubKey) {
       setError('Admin has not configured encryption keys yet. Please try again later.');
       return;
