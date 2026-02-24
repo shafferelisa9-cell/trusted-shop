@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { decryptMessage, encryptMessage, generateKeyPair } from '@/lib/e2e-crypto';
 import { getAdminPrivateKey, setAdminPrivateKey } from '@/lib/cookies';
-import { setAdminPublicKey, getAdminPublicKey } from '@/lib/admin-keys';
+import { setAdminPublicKey, getAdminPublicKey, invalidateAdminPublicKeyCache } from '@/lib/admin-keys';
 import Header from '@/components/Header';
 
 const Admin = () => {
@@ -14,6 +14,7 @@ const Admin = () => {
   const [hasKey, setHasKey] = useState(false);
   const [privateKeyInput, setPrivateKeyInput] = useState('');
   const [generatedKeys, setGeneratedKeys] = useState<{ publicKey: string; privateKey: string } | null>(null);
+  const [existingPubKey, setExistingPubKey] = useState<string | null>(null);
 
   // Products
   const [products, setProducts] = useState<any[]>([]);
@@ -45,6 +46,8 @@ const Admin = () => {
 
   useEffect(() => {
     if (getAdminPrivateKey()) setHasKey(true);
+    // Check if DB already has an admin public key
+    getAdminPublicKey().then((key) => setExistingPubKey(key));
   }, []);
 
   useEffect(() => {
@@ -66,6 +69,7 @@ const Admin = () => {
     const key = generatedKeys ? generatedKeys.privateKey : privateKeyInput;
     setAdminPrivateKey(key);
     if (generatedKeys) {
+      invalidateAdminPublicKeyCache();
       await setAdminPublicKey(generatedKeys.publicKey);
     }
     setHasKey(true);
@@ -278,6 +282,12 @@ const Admin = () => {
         <div className="flex items-center justify-center py-20">
           <div className="w-full max-w-lg px-6 space-y-6">
             <h1 className="text-sm font-medium text-center tracking-widest">ADMIN — SETUP ENCRYPTION</h1>
+            {existingPubKey && (
+              <div className="border border-destructive p-4 text-xs space-y-1">
+                <p className="font-medium">An encryption key already exists in the database.</p>
+                <p className="opacity-60">If you generate new keys, all previously encrypted orders and messages will become permanently unreadable. Import your existing private key instead if possible.</p>
+              </div>
+            )}
             {!generatedKeys ? (
               <div className="space-y-4">
                 <button onClick={handleGenerateKeys} className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors">

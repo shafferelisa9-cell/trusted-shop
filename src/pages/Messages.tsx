@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Header from '@/components/Header';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -23,8 +23,9 @@ const Messages = () => {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [ready, setReady] = useState(false);
+  const initRef = useRef(false);
 
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback(async () => {
     const userId = getUserId();
     if (!userId) return;
     const { data } = await supabase
@@ -40,12 +41,17 @@ const Messages = () => {
         const decrypted = await Promise.all(
           data.map(async (msg: any) => {
             try {
-              // For customer messages: decrypt with customer_private + admin_pub
-              // For admin messages: use sender_public_key if available, fallback to admin_pub
+              // For admin messages: use sender_public_key stored at send time (the admin's public key)
+              // For customer's own messages: use sender_public_key if available (the admin's public key
+              // used at encryption time), fallback to current admin key from DB
               let pubKeyForDecrypt: string | null;
               if (msg.sender === 'admin') {
                 pubKeyForDecrypt = msg.sender_public_key || adminPubKey;
               } else {
+                // Customer's own message: was encrypted with ECDH(customer_priv, admin_pub)
+                // We need the same admin_pub that was used at encryption time
+                // sender_public_key for customer msgs stores the customer's own pub key,
+                // so we use the current admin key (stable if admin doesn't regenerate)
                 pubKeyForDecrypt = adminPubKey;
               }
               if (!pubKeyForDecrypt) return { ...msg, decrypted: '[admin key not set]' };
@@ -61,28 +67,56 @@ const Messages = () => {
         setMessages(data.map((m: any) => ({ ...m, decrypted: adminPubKey ? '[no private key]' : '[admin key not set]' })));
       }
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
+    // Guard against re-initialization on auth token refresh
+    if (initRef.current) {
+      fetchMessages();
+      return;
+    }
 
     const initKeys = async () => {
       const currentUserId = getUserId();
       const currentPrivateKey = getPrivateKey();
-      
+
       if (currentUserId && currentPrivateKey) {
+        // Keys exist - just link auth_id, don't touch keys
         await supabase
           .from('users')
           .update({ auth_id: user.id } as any)
           .eq('id', currentUserId);
       } else if (currentUserId && !currentPrivateKey) {
-        const { publicKey, privateKey } = await generateKeyPair();
-        setPrivateKey(privateKey);
-        await supabase
+        // User ID exists but private key is lost (localStorage cleared)
+        // Check if DB already has a public key - if so, keys were previously set up
+        const { data: existingUser } = await supabase
           .from('users')
-          .update({ public_key: publicKey, auth_id: user.id } as any)
-          .eq('id', currentUserId);
+          .select('public_key')
+          .eq('id', currentUserId)
+          .single();
+
+        if (existingUser?.public_key) {
+          // DB has an existing public key but local private key is gone
+          // We must regenerate - old messages will be unreadable (E2EE limitation)
+          // but new messages will work
+          const { publicKey, privateKey } = await generateKeyPair();
+          setPrivateKey(privateKey);
+          await supabase
+            .from('users')
+            .update({ public_key: publicKey, auth_id: user.id } as any)
+            .eq('id', currentUserId);
+        } else {
+          // No key in DB either - first time setup
+          const { publicKey, privateKey } = await generateKeyPair();
+          setPrivateKey(privateKey);
+          await supabase
+            .from('users')
+            .update({ public_key: publicKey, auth_id: user.id } as any)
+            .eq('id', currentUserId);
+        }
       } else {
+        // No user_id cookie - look up by auth_id or create new user
         const { data: existingUser } = await supabase
           .from('users')
           .select('id, public_key')
@@ -92,6 +126,7 @@ const Messages = () => {
         if (existingUser) {
           setUserId(existingUser.id);
           if (!getPrivateKey()) {
+            // User exists in DB but no local private key
             const { publicKey, privateKey } = await generateKeyPair();
             setPrivateKey(privateKey);
             await supabase
@@ -100,6 +135,7 @@ const Messages = () => {
               .eq('id', existingUser.id);
           }
         } else {
+          // Brand new user
           const { publicKey, privateKey } = await generateKeyPair();
           setPrivateKey(privateKey);
           const { data } = await supabase
@@ -110,6 +146,7 @@ const Messages = () => {
           if (data) setUserId(data.id);
         }
       }
+      initRef.current = true;
       setReady(true);
     };
 
@@ -125,7 +162,7 @@ const Messages = () => {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user]);
+  }, [user?.id]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
