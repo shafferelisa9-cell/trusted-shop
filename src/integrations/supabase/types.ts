@@ -121,6 +121,15 @@ export type Database = {
           image_url: string
           name: string
           price_xmr: number
+          url: string
+          categories: Json
+          dosage: Json
+          duration: Json
+          effects: Json
+          harm_reduction: Json
+          detection_times: Json
+          interactions: Json
+          legal_status: Json
         }
         Insert: {
           created_at?: string
@@ -129,6 +138,15 @@ export type Database = {
           image_url?: string
           name: string
           price_xmr?: number
+          url?: string
+          categories?: Json
+          dosage?: Json
+          duration?: Json
+          effects?: Json
+          harm_reduction?: Json
+          detection_times?: Json
+          interactions?: Json
+          legal_status?: Json
         }
         Update: {
           created_at?: string
@@ -137,6 +155,15 @@ export type Database = {
           image_url?: string
           name?: string
           price_xmr?: number
+          url?: string
+          categories?: Json
+          dosage?: Json
+          duration?: Json
+          effects?: Json
+          harm_reduction?: Json
+          detection_times?: Json
+          interactions?: Json
+          legal_status?: Json
         }
         Relationships: []
       }

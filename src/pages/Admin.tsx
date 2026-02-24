@@ -23,6 +23,9 @@ const Admin = () => {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
   const [editPrice, setEditPrice] = useState(0);
+  const [bulkJson, setBulkJson] = useState('');
+  const [bulkImporting, setBulkImporting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ success: number; errors: string[] } | null>(null);
 
   // Orders
   const [orders, setOrders] = useState<any[]>([]);
@@ -131,6 +134,54 @@ const Admin = () => {
     await supabase.from('products').update({ price_xmr: editPrice }).eq('id', id);
     setEditingProduct(null);
     fetchProducts();
+  };
+
+  const bulkImportProducts = async () => {
+    setBulkImporting(true);
+    setBulkResult(null);
+    const errors: string[] = [];
+    let success = 0;
+    try {
+      let parsed = JSON.parse(bulkJson);
+      if (!Array.isArray(parsed)) parsed = [parsed];
+
+      for (let i = 0; i < parsed.length; i++) {
+        const item = parsed[i];
+        if (!item.name) {
+          errors.push(`Item ${i + 1}: missing required "name" field`);
+          continue;
+        }
+        const row: any = {
+          name: item.name,
+          description: item.description || '',
+          price_xmr: item.price ? parseFloat(item.price) : (item.price_xmr ? parseFloat(item.price_xmr) : 0),
+          image_url: item.image_url || '/placeholder.svg',
+          url: item.url || '',
+          categories: item.categories || [],
+          dosage: item.dosage || {},
+          duration: item.duration || {},
+          effects: item.effects || {},
+          harm_reduction: item.harm_reduction || [],
+          detection_times: item.detection_times || {},
+          interactions: item.interactions || {},
+          legal_status: item.legal_status || {},
+        };
+        const { error } = await supabase.from('products').insert(row);
+        if (error) {
+          errors.push(`"${item.name}": ${error.message}`);
+        } else {
+          success++;
+        }
+      }
+    } catch (err: any) {
+      errors.push(`JSON parse error: ${err.message}`);
+    }
+    setBulkResult({ success, errors });
+    if (success > 0) {
+      setBulkJson('');
+      fetchProducts();
+    }
+    setBulkImporting(false);
   };
 
   // Orders
@@ -381,6 +432,43 @@ const Admin = () => {
               </button>
             </form>
 
+            <div className="border border-foreground p-6 space-y-4">
+              <h2 className="text-xs font-medium tracking-widest">BULK IMPORT (JSON)</h2>
+              <p className="text-xs opacity-60">
+                Paste a JSON array of products (or a single object). Fields: name, url, categories, description, image_url, dosage, duration, effects, harm_reduction, detection_times, interactions, legal_status, price/price_xmr.
+              </p>
+              <textarea
+                value={bulkJson}
+                onChange={(e) => setBulkJson(e.target.value)}
+                placeholder={'[\n  {\n    "name": "Product Name",\n    "description": "...",\n    "url": "https://...",\n    "categories": ["Stimulant"],\n    "image_url": "https://...",\n    "price": "0.05",\n    "dosage": { ... },\n    "effects": { ... }\n  }\n]'}
+                className="w-full border border-foreground bg-background px-4 py-3 text-xs font-mono resize-none h-48 focus:outline-none"
+              />
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={bulkImportProducts}
+                  disabled={bulkImporting || !bulkJson.trim()}
+                  className="border border-foreground px-6 py-2 text-sm hover:bg-foreground hover:text-background transition-colors disabled:opacity-40"
+                >
+                  {bulkImporting ? 'IMPORTING...' : 'IMPORT PRODUCTS'}
+                </button>
+                {bulkResult && (
+                  <span className="text-xs">
+                    <span className="font-medium">{bulkResult.success} imported</span>
+                    {bulkResult.errors.length > 0 && (
+                      <span className="text-destructive ml-2">{bulkResult.errors.length} failed</span>
+                    )}
+                  </span>
+                )}
+              </div>
+              {bulkResult?.errors.length ? (
+                <div className="text-xs text-destructive space-y-1">
+                  {bulkResult.errors.map((err, i) => (
+                    <p key={i}>{err}</p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
             <div className="space-y-px border border-foreground">
               {products.map((p) => (
                 <div key={p.id} className="p-4 border-b border-foreground last:border-b-0">
@@ -424,7 +512,14 @@ const Admin = () => {
                       <button onClick={() => deleteProduct(p.id)} className="text-xs border border-foreground px-3 py-1 hover:bg-foreground hover:text-background transition-colors">DELETE</button>
                     </div>
                   </div>
-                  <p className="text-xs opacity-60 mt-1 ml-16">{p.description}</p>
+                  {Array.isArray(p.categories) && p.categories.length > 0 && (
+                    <div className="flex gap-1 mt-1 ml-16">
+                      {p.categories.map((cat: string, i: number) => (
+                        <span key={i} className="text-[10px] border border-foreground px-1.5 py-0.5 opacity-60">{cat}</span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs opacity-60 mt-1 ml-16 line-clamp-2">{p.description}</p>
                 </div>
               ))}
             </div>
