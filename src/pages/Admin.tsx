@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { decryptMessage, encryptMessage, generateKeyPair } from '@/lib/e2e-crypto';
 import { getAdminPrivateKey, setAdminPrivateKey } from '@/lib/cookies';
 import { setAdminPublicKey, getAdminPublicKey, invalidateAdminPublicKeyCache } from '@/lib/admin-keys';
+import { useXmrRate } from '@/hooks/useXmrRate';
 import Header from '@/components/Header';
 
 const Admin = () => {
@@ -19,10 +20,12 @@ const Admin = () => {
   // Products
   const [products, setProducts] = useState<any[]>([]);
   const [newProduct, setNewProduct] = useState({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg' });
+  const [newProductUsd, setNewProductUsd] = useState('');
   const [newImageFile, setNewImageFile] = useState<File | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
-  const [editPrice, setEditPrice] = useState(0);
+  const [editFields, setEditFields] = useState<{ name: string; description: string; categories: string[]; price_xmr: number; usd: string }>({ name: '', description: '', categories: [], price_xmr: 0, usd: '' });
+  const [newCategoryInput, setNewCategoryInput] = useState('');
   const [bulkJson, setBulkJson] = useState('');
   const [bulkImporting, setBulkImporting] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ success: number; errors: string[] } | null>(null);
@@ -41,6 +44,9 @@ const Admin = () => {
   // Stats
   const [stats, setStats] = useState({ total: 0, pending: 0, revenue: 0 });
 
+  // XMR Rate
+  const { rate, xmrToUsd } = useXmrRate();
+
   useEffect(() => {
     if (!loading && (!user || !isAdmin)) {
       navigate('/auth');
@@ -49,7 +55,6 @@ const Admin = () => {
 
   useEffect(() => {
     if (getAdminPrivateKey()) setHasKey(true);
-    // Check if DB already has an admin public key
     getAdminPublicKey().then((key) => setExistingPubKey(key));
   }, []);
 
@@ -103,6 +108,7 @@ const Admin = () => {
       }
       await supabase.from('products').insert({ ...newProduct, image_url: imageUrl });
       setNewProduct({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg' });
+      setNewProductUsd('');
       setNewImageFile(null);
       fetchProducts();
     } catch (err) {
@@ -125,15 +131,98 @@ const Admin = () => {
     }
   };
 
+  const addGalleryImage = async (productId: string, file: File) => {
+    setUploadingImage(true);
+    try {
+      const imageUrl = await uploadImage(file);
+      const product = products.find((p) => p.id === productId);
+      const existing = Array.isArray(product?.gallery_images) ? product.gallery_images : [];
+      await (supabase as any).from('products').update({ gallery_images: [...existing, imageUrl] }).eq('id', productId);
+      fetchProducts();
+    } catch (err) {
+      console.error('Gallery image add failed:', err);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const removeGalleryImage = async (productId: string, index: number) => {
+    const product = products.find((p) => p.id === productId);
+    const existing = Array.isArray(product?.gallery_images) ? [...product.gallery_images] : [];
+    existing.splice(index, 1);
+    await (supabase as any).from('products').update({ gallery_images: existing }).eq('id', productId);
+    fetchProducts();
+  };
+
   const deleteProduct = async (id: string) => {
     await supabase.from('products').delete().eq('id', id);
     fetchProducts();
   };
 
-  const updatePrice = async (id: string) => {
-    await supabase.from('products').update({ price_xmr: editPrice }).eq('id', id);
+  const startEditing = (p: any) => {
+    setEditingProduct(p.id);
+    const usdVal = rate ? (p.price_xmr * rate).toFixed(2) : '';
+    setEditFields({
+      name: p.name,
+      description: p.description || '',
+      categories: Array.isArray(p.categories) ? [...p.categories] : [],
+      price_xmr: p.price_xmr,
+      usd: usdVal,
+    });
+    setNewCategoryInput('');
+  };
+
+  const saveProduct = async (id: string) => {
+    await (supabase as any).from('products').update({
+      name: editFields.name,
+      description: editFields.description,
+      categories: editFields.categories,
+      price_xmr: editFields.price_xmr,
+    }).eq('id', id);
     setEditingProduct(null);
     fetchProducts();
+  };
+
+  const handleEditUsdChange = (usd: string) => {
+    setEditFields((prev) => {
+      const usdNum = parseFloat(usd);
+      if (rate && !isNaN(usdNum)) {
+        return { ...prev, usd, price_xmr: parseFloat((usdNum / rate).toFixed(6)) };
+      }
+      return { ...prev, usd };
+    });
+  };
+
+  const handleEditXmrChange = (xmr: number) => {
+    setEditFields((prev) => {
+      const usd = rate ? (xmr * rate).toFixed(2) : prev.usd;
+      return { ...prev, price_xmr: xmr, usd };
+    });
+  };
+
+  const handleNewProductUsdChange = (usd: string) => {
+    setNewProductUsd(usd);
+    const usdNum = parseFloat(usd);
+    if (rate && !isNaN(usdNum)) {
+      setNewProduct((prev) => ({ ...prev, price_xmr: parseFloat((usdNum / rate).toFixed(6)) }));
+    }
+  };
+
+  const handleNewProductXmrChange = (xmr: number) => {
+    setNewProduct((prev) => ({ ...prev, price_xmr: xmr }));
+    if (rate) setNewProductUsd((xmr * rate).toFixed(2));
+  };
+
+  const addCategory = () => {
+    const cat = newCategoryInput.trim();
+    if (cat && !editFields.categories.includes(cat)) {
+      setEditFields((prev) => ({ ...prev, categories: [...prev.categories, cat] }));
+    }
+    setNewCategoryInput('');
+  };
+
+  const removeCategory = (cat: string) => {
+    setEditFields((prev) => ({ ...prev, categories: prev.categories.filter((c) => c !== cat) }));
   };
 
   const bulkImportProducts = async () => {
@@ -199,7 +288,6 @@ const Admin = () => {
   const decryptOrder = async (orderId: string, encrypted: string, customerPubKey: string, orderSenderPubKey?: string) => {
     const key = getAdminPrivateKey();
     if (!key) return;
-    // Use the sender's public key stored at order creation time, fallback to current DB key
     const pubKey = orderSenderPubKey || customerPubKey;
     const decrypted = await decryptMessage(encrypted, key, pubKey);
     setDecryptedDetails((prev) => ({ ...prev, [orderId]: decrypted }));
@@ -218,7 +306,6 @@ const Admin = () => {
       .order('created_at', { ascending: false });
     if (data) {
       const uniqueIds = [...new Set(data.map((m: any) => m.order_id))];
-      // Fetch user emails via users -> profiles
       const threadList = await Promise.all(
         uniqueIds.map(async (id) => {
           const { data: userData } = await supabase.from('users').select('auth_id').eq('id', id).maybeSingle();
@@ -253,10 +340,8 @@ const Admin = () => {
             try {
               let pubKeyForDecrypt: string | null;
               if (msg.sender === 'customer') {
-                // Use sender_public_key stored at send time, fallback to current DB key
                 pubKeyForDecrypt = msg.sender_public_key || custPubKey || null;
               } else {
-                // Admin's own messages: need customer pub key to derive same shared secret
                 pubKeyForDecrypt = custPubKey || null;
               }
               if (!pubKeyForDecrypt) return { ...msg, decrypted: '[missing key]' };
@@ -283,8 +368,6 @@ const Admin = () => {
       if (!adminKey || !userData?.public_key) return;
 
       const encrypted = await encryptMessage(replyInput, adminKey, userData.public_key);
-
-      // Get admin's public key to store with message
       const adminPubKey = await getAdminPublicKey();
 
       await supabase.from('messages').insert({
@@ -426,7 +509,16 @@ const Admin = () => {
                 />
                 {newImageFile && <p className="text-xs opacity-60">Selected: {newImageFile.name}</p>}
               </div>
-              <input type="number" step="0.001" value={newProduct.price_xmr} onChange={(e) => setNewProduct({ ...newProduct, price_xmr: parseFloat(e.target.value) })} placeholder="Price (XMR)" className="w-full border border-foreground bg-background px-4 py-2 text-sm focus:outline-none" />
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-xs opacity-60">Price (XMR)</label>
+                  <input type="number" step="0.000001" value={newProduct.price_xmr} onChange={(e) => handleNewProductXmrChange(parseFloat(e.target.value) || 0)} className="w-full border border-foreground bg-background px-4 py-2 text-sm font-mono focus:outline-none" />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs opacity-60">Price (USD){!rate && ' — loading rate...'}</label>
+                  <input type="number" step="0.01" value={newProductUsd} onChange={(e) => handleNewProductUsdChange(e.target.value)} disabled={!rate} className="w-full border border-foreground bg-background px-4 py-2 text-sm font-mono focus:outline-none disabled:opacity-40" />
+                </div>
+              </div>
               <button type="submit" disabled={uploadingImage} className="border border-foreground px-6 py-2 text-sm hover:bg-foreground hover:text-background transition-colors disabled:opacity-40">
                 {uploadingImage ? 'UPLOADING...' : 'ADD PRODUCT'}
               </button>
@@ -470,58 +562,139 @@ const Admin = () => {
             </div>
 
             <div className="space-y-px border border-foreground">
-              {products.map((p) => (
-                <div key={p.id} className="p-4 border-b border-foreground last:border-b-0">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-muted border border-foreground flex-shrink-0 relative group cursor-pointer">
-                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
-                      <label className="absolute inset-0 bg-foreground/80 text-background text-[8px] font-medium flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                        CHANGE
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) changeProductImage(p.id, file);
-                          }}
-                        />
-                      </label>
-                    </div>
-                    <div className="flex-1 flex items-center justify-between">
-                      <div className="text-sm">
-                        <span className="font-medium">{p.name}</span>
-                        {editingProduct === p.id ? (
-                          <span className="ml-2">
+              {products.map((p) => {
+                const isEditing = editingProduct === p.id;
+                const gallery: string[] = Array.isArray(p.gallery_images) ? p.gallery_images : [];
+                return (
+                  <div key={p.id} className="p-4 border-b border-foreground last:border-b-0">
+                    <div className="flex items-start gap-4">
+                      {/* Main image */}
+                      <div className="w-12 h-12 bg-muted border border-foreground flex-shrink-0 relative group cursor-pointer">
+                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                        <label className="absolute inset-0 bg-foreground/80 text-background text-[8px] font-medium flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                          CHANGE
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) changeProductImage(p.id, file);
+                            }}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        {isEditing ? (
+                          <div className="space-y-3">
+                            {/* Name */}
                             <input
-                              type="number"
-                              step="0.001"
-                              value={editPrice}
-                              onChange={(e) => setEditPrice(parseFloat(e.target.value))}
-                              className="w-24 border border-foreground bg-background px-2 py-1 text-xs font-mono focus:outline-none"
+                              value={editFields.name}
+                              onChange={(e) => setEditFields((f) => ({ ...f, name: e.target.value }))}
+                              className="w-full border border-foreground bg-background px-3 py-1.5 text-sm focus:outline-none"
+                              placeholder="Product name"
                             />
-                            <button onClick={() => updatePrice(p.id)} className="ml-2 text-xs underline">Save</button>
-                            <button onClick={() => setEditingProduct(null)} className="ml-2 text-xs underline opacity-40">Cancel</button>
-                          </span>
+                            {/* Description */}
+                            <textarea
+                              value={editFields.description}
+                              onChange={(e) => setEditFields((f) => ({ ...f, description: e.target.value }))}
+                              className="w-full border border-foreground bg-background px-3 py-1.5 text-xs resize-none h-20 focus:outline-none"
+                              placeholder="Description"
+                            />
+                            {/* Categories */}
+                            <div>
+                              <div className="flex gap-1 flex-wrap mb-1">
+                                {editFields.categories.map((cat) => (
+                                  <span key={cat} className="text-[10px] border border-foreground px-1.5 py-0.5 flex items-center gap-1">
+                                    {cat}
+                                    <button type="button" onClick={() => removeCategory(cat)} className="opacity-60 hover:opacity-100">×</button>
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="flex gap-1">
+                                <input
+                                  value={newCategoryInput}
+                                  onChange={(e) => setNewCategoryInput(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCategory(); } }}
+                                  className="border border-foreground bg-background px-2 py-1 text-xs focus:outline-none flex-1"
+                                  placeholder="Add category..."
+                                />
+                                <button type="button" onClick={addCategory} className="text-xs border border-foreground px-2 py-1 hover:bg-foreground hover:text-background transition-colors">+</button>
+                              </div>
+                            </div>
+                            {/* Price USD/XMR */}
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <label className="text-[10px] opacity-60">XMR</label>
+                                <input type="number" step="0.000001" value={editFields.price_xmr} onChange={(e) => handleEditXmrChange(parseFloat(e.target.value) || 0)} className="w-full border border-foreground bg-background px-2 py-1 text-xs font-mono focus:outline-none" />
+                              </div>
+                              <div className="flex-1">
+                                <label className="text-[10px] opacity-60">USD</label>
+                                <input type="number" step="0.01" value={editFields.usd} onChange={(e) => handleEditUsdChange(e.target.value)} disabled={!rate} className="w-full border border-foreground bg-background px-2 py-1 text-xs font-mono focus:outline-none disabled:opacity-40" />
+                              </div>
+                            </div>
+                            {/* Gallery */}
+                            <div>
+                              <label className="text-[10px] opacity-60 block mb-1">GALLERY IMAGES</label>
+                              <div className="flex gap-1 flex-wrap mb-1">
+                                {gallery.map((img, i) => (
+                                  <div key={i} className="relative w-10 h-10 border border-foreground group">
+                                    <img src={img} alt="" className="w-full h-full object-cover" />
+                                    <button
+                                      type="button"
+                                      onClick={() => removeGalleryImage(p.id, i)}
+                                      className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground w-4 h-4 text-[8px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                                    >×</button>
+                                  </div>
+                                ))}
+                              </div>
+                              <label className="text-[10px] border border-foreground px-2 py-1 cursor-pointer hover:bg-foreground hover:text-background transition-colors inline-block">
+                                + ADD IMAGE
+                                <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) addGalleryImage(p.id, f); }} />
+                              </label>
+                            </div>
+                            {/* Save/Cancel */}
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => saveProduct(p.id)} className="text-xs border border-foreground px-4 py-1.5 hover:bg-foreground hover:text-background transition-colors">SAVE</button>
+                              <button type="button" onClick={() => setEditingProduct(null)} className="text-xs opacity-40 hover:opacity-80">Cancel</button>
+                            </div>
+                          </div>
                         ) : (
-                          <span className="font-mono ml-2">{p.price_xmr} XMR
-                            <button onClick={() => { setEditingProduct(p.id); setEditPrice(p.price_xmr); }} className="ml-2 text-xs underline opacity-60">edit</button>
-                          </span>
+                          <>
+                            <div className="flex items-center justify-between">
+                              <div className="text-sm">
+                                <span className="font-medium">{p.name}</span>
+                                <span className="font-mono ml-2">{p.price_xmr} XMR</span>
+                                {rate && <span className="text-xs opacity-50 ml-1">~${(p.price_xmr * rate).toFixed(2)}</span>}
+                                <button onClick={() => startEditing(p)} className="ml-2 text-xs underline opacity-60">edit</button>
+                              </div>
+                              <button onClick={() => deleteProduct(p.id)} className="text-xs border border-foreground px-3 py-1 hover:bg-foreground hover:text-background transition-colors">DELETE</button>
+                            </div>
+                            {Array.isArray(p.categories) && p.categories.length > 0 && (
+                              <div className="flex gap-1 mt-1">
+                                {p.categories.map((cat: string, i: number) => (
+                                  <span key={i} className="text-[10px] border border-foreground px-1.5 py-0.5 opacity-60">{cat}</span>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-xs opacity-60 mt-1 line-clamp-2">{p.description}</p>
+                            {gallery.length > 0 && (
+                              <div className="flex gap-1 mt-1">
+                                {gallery.map((img: string, i: number) => (
+                                  <div key={i} className="w-8 h-8 border border-foreground/30">
+                                    <img src={img} alt="" className="w-full h-full object-cover" />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
-                      <button onClick={() => deleteProduct(p.id)} className="text-xs border border-foreground px-3 py-1 hover:bg-foreground hover:text-background transition-colors">DELETE</button>
                     </div>
                   </div>
-                  {Array.isArray(p.categories) && p.categories.length > 0 && (
-                    <div className="flex gap-1 mt-1 ml-16">
-                      {p.categories.map((cat: string, i: number) => (
-                        <span key={i} className="text-[10px] border border-foreground px-1.5 py-0.5 opacity-60">{cat}</span>
-                      ))}
-                    </div>
-                  )}
-                  <p className="text-xs opacity-60 mt-1 ml-16 line-clamp-2">{p.description}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

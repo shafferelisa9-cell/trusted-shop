@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import Header from '@/components/Header';
 import OrderForm from '@/components/OrderForm';
 import { useCart } from '@/contexts/CartContext';
+import { useXmrRate } from '@/hooks/useXmrRate';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Product = Tables<'products'>;
@@ -19,7 +20,9 @@ const ProductDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [product, setProduct] = useState<Product | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [selectedImage, setSelectedImage] = useState(0);
   const { addItem } = useCart();
+  const { xmrToUsd } = useXmrRate();
 
   useEffect(() => {
     if (!id) return;
@@ -48,6 +51,9 @@ const ProductDetail = () => {
 
   const p = product as any;
   const categories = Array.isArray(p.categories) ? p.categories as string[] : [];
+  const galleryImages: string[] = Array.isArray(p.gallery_images) ? p.gallery_images : [];
+  const allImages = [product.image_url, ...galleryImages].filter(Boolean);
+
   const dosage = p.dosage as any;
   const duration = p.duration as any;
   const effects = p.effects as any;
@@ -63,14 +69,31 @@ const ProductDetail = () => {
   const hasInteractions = interactions && (interactions.dangerous?.length || interactions.caution?.length || interactions.notes);
   const hasLegalStatus = legalStatus && Object.keys(legalStatus).length > 0;
 
+  const usdPrice = xmrToUsd(product.price_xmr);
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
       <main className="max-w-5xl mx-auto px-6 py-12 space-y-12">
         {/* Top: Image + Basic Info */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-          <div className="aspect-square bg-muted border border-foreground">
-            <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+          <div className="space-y-2">
+            <div className="aspect-square bg-muted border border-foreground">
+              <img src={allImages[selectedImage] || product.image_url} alt={product.name} className="w-full h-full object-cover" />
+            </div>
+            {allImages.length > 1 && (
+              <div className="flex gap-1 overflow-x-auto">
+                {allImages.map((img, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedImage(i)}
+                    className={`w-16 h-16 border flex-shrink-0 ${selectedImage === i ? 'border-foreground' : 'border-foreground/30'}`}
+                  >
+                    <img src={img} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="space-y-8">
             <div>
@@ -82,7 +105,12 @@ const ProductDetail = () => {
                   ))}
                 </div>
               )}
-              <p className="text-lg font-mono mt-2">{product.price_xmr} XMR</p>
+              <p className="text-lg font-mono mt-2">
+                {product.price_xmr} XMR
+                {usdPrice !== null && (
+                  <span className="text-sm opacity-50 ml-2">~${usdPrice.toFixed(2)}</span>
+                )}
+              </p>
             </div>
             <p className="text-sm leading-relaxed opacity-80">{product.description}</p>
 
@@ -95,21 +123,15 @@ const ProductDetail = () => {
 
             <OrderForm product={product} />
 
-            {/* More Info URL */}
             {p.url && (
-              <a
-                href={p.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs underline hover:opacity-60 block"
-              >
+              <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-xs underline hover:opacity-60 block">
                 More info here
               </a>
             )}
           </div>
         </div>
 
-        {/* Detail Tables — full width below the image grid */}
+        {/* Detail Tables */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Dosage */}
           {hasDosage && (
@@ -196,7 +218,6 @@ const ProductDetail = () => {
             </div>
           )}
 
-          {/* Harm Reduction */}
           {harmReduction.length > 0 && (
             <div className="border border-foreground p-6">
               <h2 className="text-xs font-medium tracking-widest mb-4">HARM REDUCTION</h2>
@@ -208,7 +229,6 @@ const ProductDetail = () => {
             </div>
           )}
 
-          {/* Detection Times */}
           {hasDetectionTimes && (
             <div className="border border-foreground p-6">
               <h2 className="text-xs font-medium tracking-widest mb-4">DETECTION TIMES</h2>
@@ -223,7 +243,6 @@ const ProductDetail = () => {
             </div>
           )}
 
-          {/* Interactions */}
           {hasInteractions && (
             <div className="border border-foreground p-6">
               <h2 className="text-xs font-medium tracking-widest mb-4">INTERACTIONS</h2>
@@ -253,7 +272,6 @@ const ProductDetail = () => {
             </div>
           )}
 
-          {/* Legal Status */}
           {hasLegalStatus && (
             <div className="border border-foreground p-6">
               <h2 className="text-xs font-medium tracking-widest mb-4">LEGAL STATUS</h2>
@@ -269,7 +287,7 @@ const ProductDetail = () => {
           )}
         </div>
 
-        {/* Reviews — full width */}
+        {/* Reviews */}
         <div className="border border-foreground p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xs font-medium tracking-widest">
