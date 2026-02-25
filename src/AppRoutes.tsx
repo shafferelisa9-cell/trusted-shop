@@ -13,7 +13,7 @@ import MyOrders from "./pages/MyOrders";
 import HowToBuy from "./pages/HowToBuy";
 import Cart from "./pages/Cart";
 import Reviews from "./pages/Reviews";
-import Messages from "./pages/Messages";
+
 import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
@@ -37,7 +37,7 @@ const AppRoutes = () => (
               <Route path="/how-to-buy" element={<HowToBuy />} />
               <Route path="/cart" element={<Cart />} />
               <Route path="/reviews/:id" element={<Reviews />} />
-              <Route path="/messages" element={<Messages />} />
+              
               <Route path="/auth" element={<Auth />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="*" element={<NotFound />} />

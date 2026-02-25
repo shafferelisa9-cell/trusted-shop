@@ -18,7 +18,7 @@ const Header = () => {
             Cart{totalItems > 0 && <span className="ml-1 font-mono">({totalItems})</span>}
           </Link>
           <Link to="/orders" className="hover:opacity-60 transition-opacity">Orders</Link>
-          {user && <Link to="/messages" className="hover:opacity-60 transition-opacity">Messages</Link>}
+          
           <Link to="/how-to-buy" className="hover:opacity-60 transition-opacity">How to Buy</Link>
           {isAdmin && (
             <Link to="/admin" className="hover:opacity-60 transition-opacity font-medium">Admin</Link>
