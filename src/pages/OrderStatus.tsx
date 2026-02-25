@@ -81,10 +81,15 @@ const OrderStatus = () => {
           )}
         </div>
 
-        {isOwner && (
+        {isOwner ? (
           <div className="space-y-4">
             <h2 className="text-xs font-medium tracking-widest">MESSAGES</h2>
             <Chat orderId={order.id} />
+          </div>
+        ) : (
+          <div className="border border-foreground p-6 space-y-2">
+            <p className="text-sm opacity-60">Encrypted messages are only available on the original device/browser used to place this order.</p>
+            <p className="text-xs opacity-40">If you cleared your browser data, you won't be able to read previous messages. You can still view order status and payment info above.</p>
           </div>
         )}
       </main>
