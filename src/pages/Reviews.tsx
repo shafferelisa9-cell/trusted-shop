@@ -37,16 +37,21 @@ const Reviews = () => {
     if (data) setReviews(data);
   };
 
+  const MAX_COMMENT_LENGTH = 2000;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const userId = getUserId();
     if (!userId || !id) return;
+    const trimmed = comment.trim();
+    if (!trimmed || trimmed.length > MAX_COMMENT_LENGTH) return;
+    if (rating < 1 || rating > 5) return;
     setSubmitting(true);
     await supabase.from('reviews').insert({
       product_id: id,
       user_id: userId,
       rating,
-      comment,
+      comment: trimmed,
     });
     setComment('');
     setRating(5);
@@ -84,13 +89,17 @@ const Reviews = () => {
               </button>
             ))}
           </div>
-          <textarea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            className="w-full border border-foreground bg-background p-3 text-sm resize-none h-20 focus:outline-none"
-            placeholder="Your review..."
-            required
-          />
+          <div>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              maxLength={MAX_COMMENT_LENGTH}
+              className="w-full border border-foreground bg-background p-3 text-sm resize-none h-20 focus:outline-none"
+              placeholder="Your review..."
+              required
+            />
+            <p className="text-xs opacity-40 text-right">{comment.length}/{MAX_COMMENT_LENGTH}</p>
+          </div>
           <button
             type="submit"
             disabled={submitting}
