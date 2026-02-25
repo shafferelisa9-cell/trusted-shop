@@ -36,7 +36,7 @@ const Cart = () => {
     const adminPubKey = await getAdminPublicKey();
 
     if (!userId || !privateKey) {
-      setError('Encryption keys not ready. Please visit the Messages page first to initialize your keys, then try again.');
+      setError('Encryption keys not ready. Please refresh the page and try again.');
       return;
     }
     if (!adminPubKey) {
@@ -262,6 +262,7 @@ const Cart = () => {
                 {submitting ? 'ENCRYPTING & SUBMITTING...' : `PLACE ORDER — ${totalXMR.toFixed(4)} XMR`}
               </button>
               <p className="text-xs opacity-60">Your shipping details are E2E-encrypted before leaving your browser.</p>
+              <p className="text-xs opacity-40">⚠ Use the same device & browser and don't clear site data to keep access to your orders and encrypted messages.</p>
             </form>
           </>
         )}
