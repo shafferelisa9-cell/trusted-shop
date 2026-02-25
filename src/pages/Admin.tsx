@@ -156,15 +156,6 @@ const Admin = () => {
           description: item.description || '',
           price_xmr: item.price ? parseFloat(item.price) : (item.price_xmr ? parseFloat(item.price_xmr) : 0),
           image_url: item.image_url || '/placeholder.svg',
-          url: item.url || '',
-          categories: item.categories || [],
-          dosage: item.dosage || {},
-          duration: item.duration || {},
-          effects: item.effects || {},
-          harm_reduction: item.harm_reduction || [],
-          detection_times: item.detection_times || {},
-          interactions: item.interactions || {},
-          legal_status: item.legal_status || {},
         };
         const { error } = await supabase.from('products').insert(row);
         if (error) {
@@ -435,7 +426,7 @@ const Admin = () => {
             <div className="border border-foreground p-6 space-y-4">
               <h2 className="text-xs font-medium tracking-widest">BULK IMPORT (JSON)</h2>
               <p className="text-xs opacity-60">
-                Paste a JSON array of products (or a single object). Fields: name, url, categories, description, image_url, dosage, duration, effects, harm_reduction, detection_times, interactions, legal_status, price/price_xmr.
+                Paste a JSON array of products (or a single object). Fields: name, description, image_url, price/price_xmr.
               </p>
               <textarea
                 value={bulkJson}
