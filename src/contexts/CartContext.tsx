@@ -63,7 +63,11 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   const clearCart = () => setItems([]);
 
   const totalItems = items.reduce((sum, i) => sum + i.quantity, 0);
-  const totalXMR = items.reduce((sum, i) => sum + i.product.price_xmr * i.quantity, 0);
+  const totalXMR = items.reduce((sum, i) => {
+    const p = i.product as any;
+    const minQty = p.min_quantity ?? 1;
+    return sum + (i.product.price_xmr * i.quantity / minQty);
+  }, 0);
 
   return (
     <CartContext.Provider value={{ items, addItem, removeItem, updateQuantity, clearCart, totalItems, totalXMR }}>

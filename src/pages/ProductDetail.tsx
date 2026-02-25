@@ -158,9 +158,9 @@ const ProductDetail = () => {
               onClick={() => addItem(product, quantity)}
               className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors"
             >
-              ADD TO CART — {(product.price_xmr * quantity).toFixed(4)} XMR
-              {xmrToUsd(product.price_xmr * quantity) !== null && (
-                <span className="opacity-50 ml-2">(~${xmrToUsd(product.price_xmr * quantity)!.toFixed(2)})</span>
+              ADD TO CART — {(product.price_xmr * quantity / minQty).toFixed(4)} XMR
+              {xmrToUsd(product.price_xmr * quantity / minQty) !== null && (
+                <span className="opacity-50 ml-2">(~${xmrToUsd(product.price_xmr * quantity / minQty)!.toFixed(2)})</span>
               )}
             </button>
 
