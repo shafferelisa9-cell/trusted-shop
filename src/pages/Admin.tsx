@@ -6,6 +6,7 @@ import { decryptMessage, encryptMessage, generateKeyPair } from '@/lib/e2e-crypt
 import { getAdminPrivateKey, setAdminPrivateKey } from '@/lib/cookies';
 import { setAdminPublicKey, getAdminPublicKey, invalidateAdminPublicKeyCache } from '@/lib/admin-keys';
 import { useXmrRate } from '@/hooks/useXmrRate';
+import { useNotifications } from '@/contexts/NotificationContext';
 import Header from '@/components/Header';
 
 const Admin = () => {
@@ -46,12 +47,21 @@ const Admin = () => {
 
   // XMR Rate
   const { rate, xmrToUsd } = useXmrRate();
+  const { markAdminOrdersSeen, markAdminMessagesSeen } = useNotifications();
 
   useEffect(() => {
     if (!loading && (!user || !isAdmin)) {
       navigate('/auth');
     }
   }, [user, isAdmin, loading]);
+
+  // Mark admin notifications as seen when visiting admin page
+  useEffect(() => {
+    if (isAdmin) {
+      markAdminOrdersSeen();
+      markAdminMessagesSeen();
+    }
+  }, [isAdmin, markAdminOrdersSeen, markAdminMessagesSeen]);
 
   useEffect(() => {
     if (getAdminPrivateKey()) setHasKey(true);

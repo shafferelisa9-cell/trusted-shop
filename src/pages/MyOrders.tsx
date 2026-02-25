@@ -3,10 +3,16 @@ import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import Header from '@/components/Header';
 import { getUserId } from '@/lib/cookies';
+import { useNotifications } from '@/contexts/NotificationContext';
 
 const MyOrders = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const userId = getUserId();
+  const { markUserMessagesSeen } = useNotifications();
+
+  useEffect(() => {
+    markUserMessagesSeen();
+  }, [markUserMessagesSeen]);
 
   useEffect(() => {
     if (!userId) return;
