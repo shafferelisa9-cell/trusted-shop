@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { setEntryCode } from '@/lib/cookies';
+import bcrypt from 'bcryptjs';
+import { ENTRY_CODE_HASH } from '@/lib/gate-hash';
 
 const EntryGate = ({ onEnter }: { onEnter: () => void }) => {
   const [code, setCode] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (code.trim() === 'n063thx8e5') {
+    if (bcrypt.compareSync(code.trim(), ENTRY_CODE_HASH)) {
       setEntryCode(code.trim());
       onEnter();
     }
