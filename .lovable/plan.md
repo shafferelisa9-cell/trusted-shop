@@ -1,69 +1,114 @@
 
 
-## Fix Decryption Failures + Header Branding
+## Plan: Admin Product Editing, Multi-Image Support, and XMR/USD Price Conversion
 
-### Root Cause of "[unable to decrypt]"
+This plan covers four main features:
 
-The encryption system uses ECDH where the shared secret depends on BOTH parties' keys: `derive(sender_private, recipient_public)`. The problem is:
+1. **Admin panel: inline editing of name, description, and category tags**
+2. **Multiple product images (gallery)**
+3. **XMR to USD conversion displayed on store pages**
+4. **Admin: set price in USD with auto-conversion to XMR**
 
-1. When a customer's `private_key` cookie is lost (browser cleanup, different device, page refresh edge cases), the code in `Messages.tsx` **regenerates a new keypair** and **overwrites** the `public_key` in the database
-2. Old messages were encrypted with the OLD shared secret (old keypair). When the admin tries to decrypt, they fetch the NEW public key from the DB, producing a DIFFERENT shared secret -- decryption fails
-3. Same issue in reverse: if admin regenerates keys, old messages from customers become undecryptable
+---
 
-### Fix Strategy
+### 1. Admin Panel - Edit Name, Description, and Categories
 
-**Store the sender's public key with each message.** This way, decryption always uses the correct public key that was active when the message was sent, regardless of later key rotations.
+Currently the admin product list only allows editing the price. We will add inline editing for:
 
-### Changes Required
+- **Name**: Click "edit" next to the name to toggle an input field
+- **Description**: Expandable textarea for editing
+- **Categories**: Tag-based editor where you can add/remove category tags
 
-#### 1. Database Migration
-- Add `sender_public_key TEXT` column to the `messages` table (nullable for backward compat with existing messages)
-- Add `sender_public_key TEXT` column to the `orders` table for encrypted_details (so admin can always decrypt order details even after customer key rotation)
-- Add FK constraint from `orders.user_id` to `users(id)` for the admin join query
+**Changes:**
+- `src/pages/Admin.tsx`: Add state for editing name/description/categories per product. Add an `updateProduct()` function that saves all editable fields. Expand the product list item UI with edit controls for each field.
 
-#### 2. Update message sending (Messages.tsx)
-- When sending a message, include the sender's public key in the insert
-- When decrypting messages, use `msg.sender_public_key` instead of always fetching the latest key from DB
-- For customer messages: decrypt using `customer_private_key + admin_pub` (unchanged, admin key is stable)
-- For admin messages: decrypt using `customer_private_key + msg.sender_public_key` (the admin's pub key at send time)
+---
 
-#### 3. Update admin message handling (Admin.tsx)
-- When admin sends a reply, include admin's public key in the message insert
-- When decrypting customer messages, use `msg.sender_public_key` (customer's pub key at send time) instead of the current DB value
-- When decrypting order details, use `order.sender_public_key` if available, fallback to `users.public_key`
+### 2. Multiple Product Images
 
-#### 4. Update Chat component (Chat.tsx)
-- Same pattern: store sender's public key on send, use it on decrypt
+Add support for a gallery of images per product.
 
-#### 5. Update OrderForm (OrderForm.tsx)
-- Store the customer's current public key alongside the order so admin can always decrypt
+**Database change:**
+- Add a `gallery_images` column (jsonb, default `'[]'`) to the `products` table via migration
 
-#### 6. Move private keys from cookies to localStorage
-- Cookies have size/persistence issues; localStorage is more reliable for key storage
-- Update `cookies.ts` to use localStorage for `private_key` and `admin_private_key`
-- Add migration logic: if key exists in cookie but not localStorage, move it over
+**Admin changes (`src/pages/Admin.tsx`):**
+- Add an "Add more images" file input per product that uploads to storage and appends the URL to `gallery_images`
+- Show thumbnail strip of additional images with delete buttons
 
-#### 7. Header branding
-- Change "STORE" to "NAGSOM" in `Header.tsx`
+**Store display changes:**
+- `src/pages/ProductDetail.tsx`: Show an image carousel/gallery when multiple images exist, using the existing `embla-carousel-react` dependency
+- `src/components/ProductCard.tsx`: Keep showing the main `image_url` as the card thumbnail (no change needed)
+
+---
+
+### 3. XMR to USD Rate Display on Store Pages
+
+Show the equivalent USD price next to the XMR price on product cards and detail pages.
+
+**Approach:** Create a backend function that fetches the XMR/USD rate from CoinGecko's free public API and caches it in a database table. The frontend fetches this cached rate on page load.
+
+**Database change:**
+- Create a `settings` table with columns: `key` (text, primary key), `value` (text), `updated_at` (timestamptz). Store the XMR rate as a row with key `xmr_usd_rate`.
+
+**Edge function (`supabase/functions/update-xmr-rate/index.ts`):**
+- Fetches `https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd`
+- Upserts the rate into the `settings` table
+- Called on a schedule (cron job every 24 hours) and also callable manually
+
+**Frontend changes:**
+- Create a hook `src/hooks/useXmrRate.ts` that fetches the rate from the `settings` table
+- `src/components/ProductCard.tsx`: Show `~$XX.XX` next to XMR price
+- `src/pages/ProductDetail.tsx`: Show USD equivalent
+- `src/pages/Store.tsx`: Fetch rate once and pass down or use context
+
+---
+
+### 4. Admin - Set Price in USD with Auto XMR Conversion
+
+In the admin panel, allow setting the product price in USD. The system automatically converts it to XMR using the cached exchange rate.
+
+**Changes to `src/pages/Admin.tsx`:**
+- When editing price, show two inputs: USD and XMR
+- Typing in USD auto-calculates XMR (using the cached rate) and vice versa
+- The XMR value is what gets saved to the database
+- Also apply this to the "Add Product" form
+
+---
 
 ### Technical Details
 
-**Migration SQL:**
-```text
-ALTER TABLE public.messages ADD COLUMN sender_public_key TEXT;
-ALTER TABLE public.orders ADD COLUMN sender_public_key TEXT;
-ALTER TABLE public.orders
-  ADD CONSTRAINT orders_user_id_fkey
-  FOREIGN KEY (user_id) REFERENCES public.users(id);
+**New migration SQL:**
+```sql
+ALTER TABLE public.products
+  ADD COLUMN IF NOT EXISTS gallery_images jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+CREATE TABLE IF NOT EXISTS public.settings (
+  key text PRIMARY KEY,
+  value text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Settings are publicly readable"
+  ON public.settings FOR SELECT
+  USING (true);
+
+CREATE POLICY "Only admins can modify settings"
+  ON public.settings FOR ALL
+  USING (has_role(auth.uid(), 'admin'));
 ```
 
-**Files to modify:**
-- `src/lib/cookies.ts` -- Move private keys to localStorage with cookie fallback
-- `src/components/Header.tsx` -- "STORE" to "NAGSOM"
-- `src/pages/Messages.tsx` -- Include sender_public_key on send; use per-message key on decrypt
-- `src/pages/Admin.tsx` -- Include sender_public_key on admin reply; use per-message key on decrypt for both messages and orders
-- `src/components/Chat.tsx` -- Include sender_public_key on send; use per-message key on decrypt
-- `src/components/OrderForm.tsx` -- Include customer public_key on order insert
+**Files to create:**
+- `supabase/functions/update-xmr-rate/index.ts` - Edge function to fetch and cache XMR rate
+- `src/hooks/useXmrRate.ts` - React hook to read cached rate
 
-**Backward compatibility:** Existing messages without `sender_public_key` will fall back to fetching the current key from the DB (same behavior as now). Only future messages will be rotation-proof.
+**Files to modify:**
+- `src/pages/Admin.tsx` - Add name/description/categories editing, gallery image management, USD price input
+- `src/components/ProductCard.tsx` - Show USD equivalent
+- `src/pages/ProductDetail.tsx` - Show USD equivalent, image gallery carousel
+- `src/integrations/supabase/types.ts` - Will auto-update after migration
+
+**Cron job** (set up via SQL insert after edge function is deployed):
+- Runs the `update-xmr-rate` function every 24 hours
 
