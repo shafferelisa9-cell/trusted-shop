@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import Header from '@/components/Header';
-import OrderForm from '@/components/OrderForm';
 import { useCart } from '@/contexts/CartContext';
 import { useXmrRate } from '@/hooks/useXmrRate';
 import type { Tables } from '@/integrations/supabase/types';
@@ -34,6 +33,14 @@ const ProductDetail = () => {
       if (data) setReviews(data);
     });
   }, [id]);
+
+  // Initialize quantity to minQty on product load
+  useEffect(() => {
+    if (product) {
+      const pp = product as any;
+      setQuantity(pp.min_quantity ?? 1);
+    }
+  }, [product]);
 
   if (!product) {
     return (
@@ -76,11 +83,6 @@ const ProductDetail = () => {
   const step = p.quantity_step ?? minQty;
   const unitType = p.unit_type ?? 'pcs';
   const perUnitUsd = usdPrice !== null && minQty > 0 ? usdPrice / minQty : null;
-
-  // Initialize quantity to minQty on product load
-  if (quantity < minQty) {
-    setQuantity(minQty);
-  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -157,9 +159,10 @@ const ProductDetail = () => {
               className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors"
             >
               ADD TO CART — {(product.price_xmr * quantity).toFixed(4)} XMR
+              {xmrToUsd(product.price_xmr * quantity) !== null && (
+                <span className="opacity-50 ml-2">(~${xmrToUsd(product.price_xmr * quantity)!.toFixed(2)})</span>
+              )}
             </button>
-
-            <OrderForm product={product} />
 
             {p.url && (
               <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-xs underline hover:opacity-60 block">
