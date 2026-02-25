@@ -1,92 +1,115 @@
 
 
-## Plan: Minimum Quantity, Quantity Step, Unit Type, and Per-Unit Price Display
+## Plan: Streamline Checkout Flow and Fix Product Page Display
 
-### What This Does
-
-Adds three new settings per product that the admin can control:
-
-- **Minimum quantity** -- the smallest amount a customer can order (e.g. 50)
-- **Quantity step** -- how much the +/- buttons change the quantity by (defaults to the min quantity)
-- **Unit type** -- a label like "g", "pcs", "ml", "tabs" shown next to quantities
-
-On the product page and store cards, the price display changes to show both the total and per-unit breakdown, for example:
-
-```text
-$80.00 / from $1.60 per g
-```
-
-This updates dynamically based on the product's price and minimum quantity.
+This plan addresses several issues:
+1. Product detail page not properly showing quantity stepping, units, and per-unit pricing
+2. Cart not showing USD conversion
+3. Checkout (PLACE ORDER) should be in the cart, not on individual product pages
+4. Cart checkout should be straightforward: confirm items, see price, enter shipping info, get order link
 
 ---
 
-### Database Changes
+### 1. Remove OrderForm from Product Detail Page
 
-Add three new columns to the `products` table:
-
-- `min_quantity` (integer, default 1) -- minimum order quantity
-- `quantity_step` (integer, default 1) -- increment/decrement step for quantity selector
-- `unit_type` (text, default 'pcs') -- unit label (g, pcs, ml, tabs, etc.)
-
----
-
-### Admin Panel Changes (src/pages/Admin.tsx)
-
-**Add Product form:**
-- Add inputs for Min Quantity, Quantity Step, and Unit Type (dropdown or text input)
-
-**Edit Product inline:**
-- Add the same three fields to the editing form
-- Save them alongside name/description/categories/price
+**File: `src/pages/ProductDetail.tsx`**
+- Remove the `<OrderForm>` component and its import
+- Keep only: image gallery, product info, quantity selector with stepping, "ADD TO CART" button, and detail tables
+- Fix the quantity initialization bug (calling `setQuantity` during render causes issues -- move to `useEffect`)
 
 ---
 
-### Product Detail Page (src/pages/ProductDetail.tsx)
+### 2. Fix Product Detail Page Display
 
-- Read `min_quantity`, `quantity_step`, `unit_type` from the product
-- Show price breakdown: total USD price and per-unit price (price / min_quantity)
-- Add a quantity selector that starts at `min_quantity` and increments/decrements by `quantity_step`
-- The "Add to Cart" button adds the selected quantity
-- Display format example: `0.5 XMR (~$80.00) / from $1.60 per g`
-
----
-
-### Product Card (src/components/ProductCard.tsx)
-
-- Show per-unit price below the total: e.g. `~$80.00 / $1.60 per g`
+**File: `src/pages/ProductDetail.tsx`**
+- Fix quantity initialization to use `useEffect` instead of calling `setQuantity` during render
+- Ensure the quantity selector properly shows units and steps
+- Show dynamic price on "ADD TO CART" button that updates with quantity (both XMR and USD)
+- Always show per-unit USD price (even when min_quantity is 1, as long as USD rate is available)
 
 ---
 
-### Cart (src/pages/Cart.tsx and src/contexts/CartContext.tsx)
+### 3. Revamp Cart Page with Integrated Checkout
 
-- Quantity +/- buttons use the product's `quantity_step` instead of 1
-- Enforce `min_quantity` as the floor (removing if quantity goes below it)
-- `addItem` sets initial quantity to `min_quantity` instead of 1
-- Show unit type next to quantities in the cart
+**File: `src/pages/Cart.tsx`**
+- Add USD conversion display next to XMR prices (use `useXmrRate` hook)
+- Show per-item subtotal in both XMR and USD
+- Show total in both XMR and USD
+- Replace the current "HOW TO ORDER" instructions with a proper checkout flow:
+
+**Checkout flow (all within Cart page):**
+1. **Review items** -- already shown with quantities, prices in XMR + USD
+2. **Enter shipping info** -- inline form with shipping address and optional notes (E2E encrypted)
+3. **PLACE ORDER button** -- encrypts details, creates one order per cart item (or a single combined order), shows the XMR wallet address and exact amount to send
+4. **Order confirmation** -- shows tracking link(s) after successful order placement
+
+This reuses the encryption logic from `OrderForm` but operates on the entire cart instead of a single product.
+
+---
+
+### 4. Update OrderForm Component
+
+**File: `src/components/OrderForm.tsx`**
+- Refactor to accept cart items (array of products + quantities) instead of a single product
+- Calculate total XMR from all cart items
+- Create one order per cart item in the database (each with its own tracking token)
+- After success, show all tracking links and the total XMR to send
+- Clear the cart after successful order placement
+
+Alternatively, we can move the checkout logic directly into `Cart.tsx` and stop using `OrderForm` as a separate component. This keeps things simpler since the form is now only used in one place.
 
 ---
 
 ### Technical Details
 
-**Migration SQL:**
-```sql
-ALTER TABLE public.products
-  ADD COLUMN IF NOT EXISTS min_quantity integer NOT NULL DEFAULT 1,
-  ADD COLUMN IF NOT EXISTS quantity_step integer NOT NULL DEFAULT 1,
-  ADD COLUMN IF NOT EXISTS unit_type text NOT NULL DEFAULT 'pcs';
-```
-
 **Files to modify:**
-- `src/pages/Admin.tsx` -- add min_quantity, quantity_step, unit_type to add/edit forms and save logic
-- `src/pages/ProductDetail.tsx` -- quantity selector with step, per-unit price display
-- `src/components/ProductCard.tsx` -- per-unit price display
-- `src/contexts/CartContext.tsx` -- respect min_quantity and quantity_step in addItem/updateQuantity
-- `src/pages/Cart.tsx` -- use quantity_step for +/- buttons, show unit type
-- `src/integrations/supabase/types.ts` -- auto-updates after migration
 
-**Price display logic (pseudocode):**
+1. **`src/pages/ProductDetail.tsx`**
+   - Remove `import OrderForm` and `<OrderForm product={product} />`
+   - Fix quantity init: replace the render-time `if (quantity < minQty) setQuantity(minQty)` with a `useEffect` that sets quantity to `minQty` when product loads
+   - Update "ADD TO CART" button to show USD: `ADD TO CART -- 0.5 XMR (~$80.00)`
+
+2. **`src/pages/Cart.tsx`**
+   - Import `useXmrRate` hook
+   - Import encryption utilities: `encryptMessage`, `getAdminPublicKey`, `getUserId`, `getPrivateKey`
+   - Import `supabase` client
+   - Add USD display next to every XMR price (per item and total)
+   - Add checkout form state: `address`, `notes`, `submitting`, `orderResults`
+   - Add `handlePlaceOrder` function that:
+     - Validates encryption keys are ready (auto-initializes if needed)
+     - Encrypts shipping details
+     - Creates an order for each cart item in the database
+     - Collects all tracking tokens
+     - Shows confirmation with wallet address + total XMR + tracking links
+     - Clears the cart
+   - Replace the "HOW TO ORDER" / "CONTACT US" section with:
+     - Shipping address textarea
+     - Notes textarea (optional)
+     - PLACE ORDER button
+     - After placement: wallet address, total XMR, and list of tracking links
+
+3. **`src/components/OrderForm.tsx`**
+   - Keep file but it will no longer be imported anywhere (can clean up later)
+   - Or delete the import from ProductDetail -- either way it stops being used on product pages
+
+**No database changes needed** -- the orders table already has all required columns.
+
+**Checkout flow summary for the user:**
+
 ```text
-perUnitUsd = totalUsd / minQuantity
-Display: "$80.00 / from $1.60 per g"
+Cart Page
+  |
+  +-- Item list with quantities (stepping by quantity_step), XMR + USD prices
+  |
+  +-- Total: X.XXXX XMR (~$XX.XX)
+  |
+  +-- Shipping Address [textarea]
+  +-- Notes (optional) [textarea]
+  |
+  +-- [PLACE ORDER] button
+  |
+  +-- After order:
+       - "Send exactly X.XXXX XMR to [wallet address]"
+       - Tracking links for each item
 ```
 
