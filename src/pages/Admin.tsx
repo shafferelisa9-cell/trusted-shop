@@ -34,9 +34,9 @@ const Admin = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [decryptedDetails, setDecryptedDetails] = useState<Record<string, string>>({});
 
-  // Messages
-  const [threads, setThreads] = useState<{ id: string; email?: string; orders: { id: string; productName: string; status: string; price_xmr: number; created_at: string }[] }[]>([]);
-  const [selectedThread, setSelectedThread] = useState<string | null>(null);
+  // Messages - per-order threads
+  const [threads, setThreads] = useState<{ orderId: string; userId: string; email?: string; productName: string; status: string; price_xmr: number; created_at: string; trackingToken: string }[]>([]);
+  const [selectedThread, setSelectedThread] = useState<string | null>(null); // order_id
   const [threadMessages, setThreadMessages] = useState<any[]>([]);
   const [replyInput, setReplyInput] = useState('');
   const [replySending, setReplySending] = useState(false);
@@ -306,54 +306,57 @@ const Admin = () => {
 
   // Messages
   const fetchThreads = async () => {
-    // Source threads from orders (every buyer) AND messages (in case of threads without orders)
-    const [{ data: orderData }, { data: msgData }] = await Promise.all([
-      supabase.from('orders').select('user_id').order('created_at', { ascending: false }),
-      supabase.from('messages').select('order_id').order('created_at', { ascending: false }),
-    ]);
+    const { data: allOrders } = await supabase
+      .from('orders')
+      .select('id, user_id, status, price_xmr, created_at, tracking_token, products(name)')
+      .order('created_at', { ascending: false });
 
-    const userIdsFromOrders = (orderData || []).map((o: any) => o.user_id);
-    const userIdsFromMessages = (msgData || []).map((m: any) => m.order_id);
-    const uniqueIds = [...new Set([...userIdsFromOrders, ...userIdsFromMessages])];
+    if (!allOrders) return;
 
-    const threadList = await Promise.all(
-      uniqueIds.map(async (id) => {
-        const { data: userData } = await supabase.from('users').select('auth_id').eq('id', id).maybeSingle();
-        let email: string | undefined;
+    // Get unique user_ids to batch-fetch emails
+    const userIds = [...new Set(allOrders.map((o: any) => o.user_id))];
+    const emailMap: Record<string, string> = {};
+    await Promise.all(
+      userIds.map(async (uid) => {
+        const { data: userData } = await supabase.from('users').select('auth_id').eq('id', uid).maybeSingle();
         if (userData?.auth_id) {
           const { data: profile } = await supabase.from('profiles').select('email').eq('auth_id', userData.auth_id).maybeSingle();
-          email = profile?.email ?? undefined;
+          if (profile?.email) emailMap[uid] = profile.email;
         }
-        const { data: userOrders } = await supabase
-          .from('orders')
-          .select('id, status, price_xmr, created_at, products(name)')
-          .eq('user_id', id)
-          .order('created_at', { ascending: false });
-        const orders = (userOrders || []).map((o: any) => ({
-          id: o.id,
-          productName: o.products?.name || 'Unknown',
-          status: o.status,
-          price_xmr: Number(o.price_xmr),
-          created_at: o.created_at,
-        }));
-        return { id, email, orders };
       })
     );
+
+    const threadList = allOrders.map((o: any) => ({
+      orderId: o.id,
+      userId: o.user_id,
+      email: emailMap[o.user_id],
+      productName: o.products?.name || 'Unknown',
+      status: o.status,
+      price_xmr: Number(o.price_xmr),
+      created_at: o.created_at,
+      trackingToken: o.tracking_token,
+    }));
     setThreads(threadList);
   };
 
-  const openThread = async (threadId: string) => {
-    setSelectedThread(threadId);
+  const openThread = async (orderId: string) => {
+    setSelectedThread(orderId);
     const { data } = await supabase
       .from('messages')
       .select('*')
-      .eq('order_id', threadId)
+      .eq('order_id', orderId)
       .order('created_at', { ascending: true });
 
     if (data) {
       const adminKey = getAdminPrivateKey();
-      const { data: userData } = await supabase.from('users').select('public_key').eq('id', threadId).single();
-      const custPubKey = userData?.public_key;
+      // Find the user_id for this order to get their public key
+      const thread = threads.find((t) => t.orderId === orderId);
+      const userId = thread?.userId;
+      let custPubKey: string | undefined;
+      if (userId) {
+        const { data: userData } = await supabase.from('users').select('public_key').eq('id', userId).single();
+        custPubKey = userData?.public_key;
+      }
 
       if (adminKey) {
         const decrypted = await Promise.all(
@@ -385,14 +388,17 @@ const Admin = () => {
     setReplySending(true);
     try {
       const adminKey = getAdminPrivateKey();
-      const { data: userData } = await supabase.from('users').select('public_key').eq('id', selectedThread).single();
+      // Get the user_id from the selected order thread
+      const thread = threads.find((t) => t.orderId === selectedThread);
+      if (!thread) return;
+      const { data: userData } = await supabase.from('users').select('public_key').eq('id', thread.userId).single();
       if (!adminKey || !userData?.public_key) return;
 
       const encrypted = await encryptMessage(replyInput, adminKey, userData.public_key);
       const adminPubKey = await getAdminPublicKey();
 
       await supabase.from('messages').insert({
-        order_id: selectedThread,
+        order_id: selectedThread, // actual order ID now
         encrypted_content: encrypted,
         sender: 'admin',
         sender_public_key: adminPubKey,
@@ -798,26 +804,19 @@ const Admin = () => {
                 <h3 className="text-xs font-medium tracking-widest">CONVERSATIONS</h3>
               </div>
               <div className="max-h-96 overflow-y-auto">
-                {threads.length === 0 && <p className="text-xs opacity-40 p-3">No conversations.</p>}
+                {threads.length === 0 && <p className="text-xs opacity-40 p-3">No orders yet.</p>}
                 {threads.map((thread) => (
                   <button
-                    key={thread.id}
-                    onClick={() => openThread(thread.id)}
-                    className={`w-full text-left p-3 text-xs border-b border-foreground last:border-b-0 hover:bg-muted transition-colors ${selectedThread === thread.id ? 'bg-muted' : ''}`}
+                    key={thread.orderId}
+                    onClick={() => openThread(thread.orderId)}
+                    className={`w-full text-left p-3 text-xs border-b border-foreground last:border-b-0 hover:bg-muted transition-colors ${selectedThread === thread.orderId ? 'bg-muted' : ''}`}
                   >
                     <div className="font-medium">{thread.email || 'Anonymous'}</div>
-                    <div className="font-mono opacity-40 mt-0.5">{thread.id.slice(0, 8)}...</div>
-                    {thread.orders.length > 0 && (
-                      <div className="mt-1 space-y-0.5">
-                        {thread.orders.slice(0, 3).map((o) => (
-                          <div key={o.id} className="flex items-center gap-1 opacity-60">
-                            <span className="truncate max-w-[100px]">{o.productName}</span>
-                            <span className="uppercase border border-foreground/40 px-1 py-px text-[9px]">{o.status}</span>
-                          </div>
-                        ))}
-                        {thread.orders.length > 3 && <div className="opacity-40">+{thread.orders.length - 3} more</div>}
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="truncate max-w-[120px]">{thread.productName}</span>
+                      <span className="uppercase border border-foreground/40 px-1 py-px text-[9px]">{thread.status}</span>
+                    </div>
+                    <div className="font-mono opacity-40 mt-0.5 text-[10px]">{thread.price_xmr} XMR · #{thread.trackingToken.slice(0, 8)}</div>
                   </button>
                 ))}
               </div>
@@ -825,20 +824,15 @@ const Admin = () => {
 
             <div className="border border-foreground md:col-span-2 flex flex-col h-96">
               {selectedThread && (() => {
-                const t = threads.find((th) => th.id === selectedThread);
+                const t = threads.find((th) => th.orderId === selectedThread);
                 return t ? (
                   <div className="p-3 border-b border-foreground text-xs space-y-1 bg-muted/30">
-                    <div className="font-medium">{t.email || 'Anonymous'} <span className="font-mono opacity-40 ml-1">{t.id.slice(0, 8)}</span></div>
-                    {t.orders.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {t.orders.map((o) => (
-                          <span key={o.id} className="border border-foreground/40 px-2 py-0.5 text-[10px]">
-                            {o.productName} — {o.price_xmr} XMR — <span className="uppercase">{o.status}</span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {t.orders.length === 0 && <div className="opacity-40">No orders from this user</div>}
+                    <div className="font-medium">{t.email || 'Anonymous'} <span className="font-mono opacity-40 ml-1">#{t.trackingToken.slice(0, 8)}</span></div>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      <span className="border border-foreground/40 px-2 py-0.5 text-[10px]">
+                        {t.productName} — {t.price_xmr} XMR — <span className="uppercase">{t.status}</span>
+                      </span>
+                    </div>
                   </div>
                 ) : null;
               })()}
