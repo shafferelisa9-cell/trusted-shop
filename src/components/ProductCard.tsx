@@ -27,7 +27,10 @@ const ProductCard = ({ product }: { product: Product }) => {
               ))}
             </div>
           )}
-          <p className="text-sm font-mono mt-1">{product.price_xmr} XMR</p>
+          {product.description && (
+            <p className="text-xs opacity-50 mt-1.5 line-clamp-2">{product.description}</p>
+          )}
+          <p className="text-sm font-mono mt-1.5">{product.price_xmr} XMR</p>
         </div>
       </Link>
       <div className="border-t border-foreground flex">
