@@ -306,38 +306,40 @@ const Admin = () => {
 
   // Messages
   const fetchThreads = async () => {
-    const { data } = await supabase
-      .from('messages')
-      .select('order_id')
-      .order('created_at', { ascending: false });
-    if (data) {
-      const uniqueIds = [...new Set(data.map((m: any) => m.order_id))];
-      const threadList = await Promise.all(
-        uniqueIds.map(async (id) => {
-          const { data: userData } = await supabase.from('users').select('auth_id').eq('id', id).maybeSingle();
-          let email: string | undefined;
-          if (userData?.auth_id) {
-            const { data: profile } = await supabase.from('profiles').select('email').eq('auth_id', userData.auth_id).maybeSingle();
-            email = profile?.email ?? undefined;
-          }
-          // Fetch orders for this user
-          const { data: userOrders } = await supabase
-            .from('orders')
-            .select('id, status, price_xmr, created_at, products(name)')
-            .eq('user_id', id)
-            .order('created_at', { ascending: false });
-          const orders = (userOrders || []).map((o: any) => ({
-            id: o.id,
-            productName: o.products?.name || 'Unknown',
-            status: o.status,
-            price_xmr: Number(o.price_xmr),
-            created_at: o.created_at,
-          }));
-          return { id, email, orders };
-        })
-      );
-      setThreads(threadList);
-    }
+    // Source threads from orders (every buyer) AND messages (in case of threads without orders)
+    const [{ data: orderData }, { data: msgData }] = await Promise.all([
+      supabase.from('orders').select('user_id').order('created_at', { ascending: false }),
+      supabase.from('messages').select('order_id').order('created_at', { ascending: false }),
+    ]);
+
+    const userIdsFromOrders = (orderData || []).map((o: any) => o.user_id);
+    const userIdsFromMessages = (msgData || []).map((m: any) => m.order_id);
+    const uniqueIds = [...new Set([...userIdsFromOrders, ...userIdsFromMessages])];
+
+    const threadList = await Promise.all(
+      uniqueIds.map(async (id) => {
+        const { data: userData } = await supabase.from('users').select('auth_id').eq('id', id).maybeSingle();
+        let email: string | undefined;
+        if (userData?.auth_id) {
+          const { data: profile } = await supabase.from('profiles').select('email').eq('auth_id', userData.auth_id).maybeSingle();
+          email = profile?.email ?? undefined;
+        }
+        const { data: userOrders } = await supabase
+          .from('orders')
+          .select('id, status, price_xmr, created_at, products(name)')
+          .eq('user_id', id)
+          .order('created_at', { ascending: false });
+        const orders = (userOrders || []).map((o: any) => ({
+          id: o.id,
+          productName: o.products?.name || 'Unknown',
+          status: o.status,
+          price_xmr: Number(o.price_xmr),
+          created_at: o.created_at,
+        }));
+        return { id, email, orders };
+      })
+    );
+    setThreads(threadList);
   };
 
   const openThread = async (threadId: string) => {
@@ -413,6 +415,9 @@ const Admin = () => {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
         fetchThreads();
         if (selectedThread) openThread(selectedThread);
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, () => {
+        fetchThreads();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
