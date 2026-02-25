@@ -122,6 +122,7 @@ export type Database = {
           dosage: Json
           duration: Json
           effects: Json
+          gallery_images: Json
           harm_reduction: Json
           id: string
           image_url: string
@@ -139,6 +140,7 @@ export type Database = {
           dosage?: Json
           duration?: Json
           effects?: Json
+          gallery_images?: Json
           harm_reduction?: Json
           id?: string
           image_url?: string
@@ -156,6 +158,7 @@ export type Database = {
           dosage?: Json
           duration?: Json
           effects?: Json
+          gallery_images?: Json
           harm_reduction?: Json
           id?: string
           image_url?: string
@@ -229,6 +232,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: []
       }
       user_roles: {
         Row: {

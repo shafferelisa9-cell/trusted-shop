@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import Header from '@/components/Header';
 import ProductCard from '@/components/ProductCard';
+import { useXmrRate } from '@/hooks/useXmrRate';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Product = Tables<'products'>;
@@ -12,6 +13,7 @@ const Store = () => {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'newest' | 'price-asc' | 'price-desc'>('newest');
+  const { xmrToUsd } = useXmrRate();
 
   useEffect(() => {
     const fetch = async () => {
@@ -128,7 +130,7 @@ const Store = () => {
             <p className="text-xs opacity-40 mb-4">{filtered.length} product{filtered.length !== 1 ? 's' : ''}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px border border-foreground">
               {filtered.map((p) => (
-                <ProductCard key={p.id} product={p} />
+                <ProductCard key={p.id} product={p} xmrToUsd={xmrToUsd} />
               ))}
             </div>
           </>

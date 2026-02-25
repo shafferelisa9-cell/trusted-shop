@@ -4,8 +4,14 @@ import type { Tables } from '@/integrations/supabase/types';
 
 type Product = Tables<'products'>;
 
-const ProductCard = ({ product }: { product: Product }) => {
+interface ProductCardProps {
+  product: Product;
+  xmrToUsd?: (xmr: number) => number | null;
+}
+
+const ProductCard = ({ product, xmrToUsd }: ProductCardProps) => {
   const { addItem } = useCart();
+  const usdPrice = xmrToUsd ? xmrToUsd(product.price_xmr) : null;
 
   return (
     <div className="border border-foreground">
@@ -30,7 +36,12 @@ const ProductCard = ({ product }: { product: Product }) => {
           {product.description && (
             <p className="text-xs opacity-50 mt-1.5 line-clamp-2">{product.description}</p>
           )}
-          <p className="text-sm font-mono mt-1.5">{product.price_xmr} XMR</p>
+          <p className="text-sm font-mono mt-1.5">
+            {product.price_xmr} XMR
+            {usdPrice !== null && (
+              <span className="text-xs opacity-50 ml-1.5">~${usdPrice.toFixed(2)}</span>
+            )}
+          </p>
         </div>
       </Link>
       <div className="border-t border-foreground flex">
