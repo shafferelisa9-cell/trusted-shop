@@ -115,28 +115,55 @@ export type Database = {
       }
       products: {
         Row: {
+          categories: Json
           created_at: string
           description: string
+          detection_times: Json
+          dosage: Json
+          duration: Json
+          effects: Json
+          harm_reduction: Json
           id: string
           image_url: string
+          interactions: Json
+          legal_status: Json
           name: string
           price_xmr: number
+          url: string
         }
         Insert: {
+          categories?: Json
           created_at?: string
           description?: string
+          detection_times?: Json
+          dosage?: Json
+          duration?: Json
+          effects?: Json
+          harm_reduction?: Json
           id?: string
           image_url?: string
+          interactions?: Json
+          legal_status?: Json
           name: string
           price_xmr?: number
+          url?: string
         }
         Update: {
+          categories?: Json
           created_at?: string
           description?: string
+          detection_times?: Json
+          dosage?: Json
+          duration?: Json
+          effects?: Json
+          harm_reduction?: Json
           id?: string
           image_url?: string
+          interactions?: Json
+          legal_status?: Json
           name?: string
           price_xmr?: number
+          url?: string
         }
         Relationships: []
       }
