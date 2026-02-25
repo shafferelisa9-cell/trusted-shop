@@ -35,7 +35,7 @@ const Admin = () => {
   const [decryptedDetails, setDecryptedDetails] = useState<Record<string, string>>({});
 
   // Messages
-  const [threads, setThreads] = useState<{ id: string; email?: string }[]>([]);
+  const [threads, setThreads] = useState<{ id: string; email?: string; orders: { id: string; productName: string; status: string; price_xmr: number; created_at: string }[] }[]>([]);
   const [selectedThread, setSelectedThread] = useState<string | null>(null);
   const [threadMessages, setThreadMessages] = useState<any[]>([]);
   const [replyInput, setReplyInput] = useState('');
@@ -320,7 +320,20 @@ const Admin = () => {
             const { data: profile } = await supabase.from('profiles').select('email').eq('auth_id', userData.auth_id).maybeSingle();
             email = profile?.email ?? undefined;
           }
-          return { id, email };
+          // Fetch orders for this user
+          const { data: userOrders } = await supabase
+            .from('orders')
+            .select('id, status, price_xmr, created_at, products(name)')
+            .eq('user_id', id)
+            .order('created_at', { ascending: false });
+          const orders = (userOrders || []).map((o: any) => ({
+            id: o.id,
+            productName: o.products?.name || 'Unknown',
+            status: o.status,
+            price_xmr: Number(o.price_xmr),
+            created_at: o.created_at,
+          }));
+          return { id, email, orders };
         })
       );
       setThreads(threadList);
@@ -787,14 +800,43 @@ const Admin = () => {
                     onClick={() => openThread(thread.id)}
                     className={`w-full text-left p-3 text-xs border-b border-foreground last:border-b-0 hover:bg-muted transition-colors ${selectedThread === thread.id ? 'bg-muted' : ''}`}
                   >
-                    <div className="font-medium">{thread.email || 'Unknown user'}</div>
+                    <div className="font-medium">{thread.email || 'Anonymous'}</div>
                     <div className="font-mono opacity-40 mt-0.5">{thread.id.slice(0, 8)}...</div>
+                    {thread.orders.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {thread.orders.slice(0, 3).map((o) => (
+                          <div key={o.id} className="flex items-center gap-1 opacity-60">
+                            <span className="truncate max-w-[100px]">{o.productName}</span>
+                            <span className="uppercase border border-foreground/40 px-1 py-px text-[9px]">{o.status}</span>
+                          </div>
+                        ))}
+                        {thread.orders.length > 3 && <div className="opacity-40">+{thread.orders.length - 3} more</div>}
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="border border-foreground md:col-span-2 flex flex-col h-96">
+              {selectedThread && (() => {
+                const t = threads.find((th) => th.id === selectedThread);
+                return t ? (
+                  <div className="p-3 border-b border-foreground text-xs space-y-1 bg-muted/30">
+                    <div className="font-medium">{t.email || 'Anonymous'} <span className="font-mono opacity-40 ml-1">{t.id.slice(0, 8)}</span></div>
+                    {t.orders.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {t.orders.map((o) => (
+                          <span key={o.id} className="border border-foreground/40 px-2 py-0.5 text-[10px]">
+                            {o.productName} — {o.price_xmr} XMR — <span className="uppercase">{o.status}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {t.orders.length === 0 && <div className="opacity-40">No orders from this user</div>}
+                  </div>
+                ) : null;
+              })()}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {!selectedThread && (
                   <p className="text-sm opacity-40 text-center py-8">Select a conversation.</p>
