@@ -57,7 +57,9 @@ const Cart = () => {
       const results: OrderResult[] = [];
 
       for (const item of items) {
-        const itemXmr = item.product.price_xmr * item.quantity;
+        const ip = item.product as any;
+        const iMinQty = ip.min_quantity ?? 1;
+        const itemXmr = item.product.price_xmr * item.quantity / iMinQty;
         const { data, error: dbErr } = await supabase
           .from('orders')
           .insert({
@@ -163,7 +165,8 @@ const Cart = () => {
                 const p = item.product as any;
                 const step = p.quantity_step ?? 1;
                 const unitType = p.unit_type ?? 'pcs';
-                const itemXmr = item.product.price_xmr * item.quantity;
+                const minQty = p.min_quantity ?? 1;
+                const itemXmr = item.product.price_xmr * item.quantity / minQty;
                 const itemUsd = xmrToUsd(itemXmr);
                 return (
                   <div
