@@ -12,6 +12,10 @@ interface ProductCardProps {
 const ProductCard = ({ product, xmrToUsd }: ProductCardProps) => {
   const { addItem } = useCart();
   const usdPrice = xmrToUsd ? xmrToUsd(product.price_xmr) : null;
+  const p = product as any;
+  const minQty = p.min_quantity ?? 1;
+  const unitType = p.unit_type ?? 'pcs';
+  const perUnitUsd = usdPrice !== null && minQty > 0 ? usdPrice / minQty : null;
 
   return (
     <div className="border border-foreground">
@@ -42,6 +46,11 @@ const ProductCard = ({ product, xmrToUsd }: ProductCardProps) => {
               <span className="text-xs opacity-50 ml-1.5">~${usdPrice.toFixed(2)}</span>
             )}
           </p>
+          {perUnitUsd !== null && minQty > 1 && (
+            <p className="text-xs opacity-50 font-mono mt-0.5">
+              from ${perUnitUsd.toFixed(2)} per {unitType}
+            </p>
+          )}
         </div>
       </Link>
       <div className="border-t border-foreground flex">

@@ -19,12 +19,12 @@ const Admin = () => {
 
   // Products
   const [products, setProducts] = useState<any[]>([]);
-  const [newProduct, setNewProduct] = useState({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg' });
+  const [newProduct, setNewProduct] = useState({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg', min_quantity: 1, quantity_step: 1, unit_type: 'pcs' });
   const [newProductUsd, setNewProductUsd] = useState('');
   const [newImageFile, setNewImageFile] = useState<File | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
-  const [editFields, setEditFields] = useState<{ name: string; description: string; categories: string[]; price_xmr: number; usd: string }>({ name: '', description: '', categories: [], price_xmr: 0, usd: '' });
+  const [editFields, setEditFields] = useState<{ name: string; description: string; categories: string[]; price_xmr: number; usd: string; min_quantity: number; quantity_step: number; unit_type: string }>({ name: '', description: '', categories: [], price_xmr: 0, usd: '', min_quantity: 1, quantity_step: 1, unit_type: 'pcs' });
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const [bulkJson, setBulkJson] = useState('');
   const [bulkImporting, setBulkImporting] = useState(false);
@@ -106,8 +106,8 @@ const Admin = () => {
       if (newImageFile) {
         imageUrl = await uploadImage(newImageFile);
       }
-      await supabase.from('products').insert({ ...newProduct, image_url: imageUrl });
-      setNewProduct({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg' });
+      await supabase.from('products').insert({ ...newProduct, image_url: imageUrl } as any);
+      setNewProduct({ name: '', description: '', price_xmr: 0, image_url: '/placeholder.svg', min_quantity: 1, quantity_step: 1, unit_type: 'pcs' });
       setNewProductUsd('');
       setNewImageFile(null);
       fetchProducts();
@@ -168,6 +168,9 @@ const Admin = () => {
       categories: Array.isArray(p.categories) ? [...p.categories] : [],
       price_xmr: p.price_xmr,
       usd: usdVal,
+      min_quantity: p.min_quantity ?? 1,
+      quantity_step: p.quantity_step ?? 1,
+      unit_type: p.unit_type ?? 'pcs',
     });
     setNewCategoryInput('');
   };
@@ -178,6 +181,9 @@ const Admin = () => {
       description: editFields.description,
       categories: editFields.categories,
       price_xmr: editFields.price_xmr,
+      min_quantity: editFields.min_quantity,
+      quantity_step: editFields.quantity_step,
+      unit_type: editFields.unit_type,
     }).eq('id', id);
     setEditingProduct(null);
     fetchProducts();
@@ -519,6 +525,20 @@ const Admin = () => {
                   <input type="number" step="0.01" value={newProductUsd} onChange={(e) => handleNewProductUsdChange(e.target.value)} disabled={!rate} className="w-full border border-foreground bg-background px-4 py-2 text-sm font-mono focus:outline-none disabled:opacity-40" />
                 </div>
               </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-xs opacity-60">Min Quantity</label>
+                  <input type="number" min="1" value={newProduct.min_quantity} onChange={(e) => setNewProduct({ ...newProduct, min_quantity: parseInt(e.target.value) || 1 })} className="w-full border border-foreground bg-background px-4 py-2 text-sm font-mono focus:outline-none" />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs opacity-60">Qty Step</label>
+                  <input type="number" min="1" value={newProduct.quantity_step} onChange={(e) => setNewProduct({ ...newProduct, quantity_step: parseInt(e.target.value) || 1 })} className="w-full border border-foreground bg-background px-4 py-2 text-sm font-mono focus:outline-none" />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs opacity-60">Unit Type</label>
+                  <input value={newProduct.unit_type} onChange={(e) => setNewProduct({ ...newProduct, unit_type: e.target.value })} placeholder="pcs, g, ml..." className="w-full border border-foreground bg-background px-4 py-2 text-sm focus:outline-none" />
+                </div>
+              </div>
               <button type="submit" disabled={uploadingImage} className="border border-foreground px-6 py-2 text-sm hover:bg-foreground hover:text-background transition-colors disabled:opacity-40">
                 {uploadingImage ? 'UPLOADING...' : 'ADD PRODUCT'}
               </button>
@@ -632,6 +652,21 @@ const Admin = () => {
                               <div className="flex-1">
                                 <label className="text-[10px] opacity-60">USD</label>
                                 <input type="number" step="0.01" value={editFields.usd} onChange={(e) => handleEditUsdChange(e.target.value)} disabled={!rate} className="w-full border border-foreground bg-background px-2 py-1 text-xs font-mono focus:outline-none disabled:opacity-40" />
+                              </div>
+                            </div>
+                            {/* Min Qty / Step / Unit */}
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <label className="text-[10px] opacity-60">Min Qty</label>
+                                <input type="number" min="1" value={editFields.min_quantity} onChange={(e) => setEditFields((f) => ({ ...f, min_quantity: parseInt(e.target.value) || 1 }))} className="w-full border border-foreground bg-background px-2 py-1 text-xs font-mono focus:outline-none" />
+                              </div>
+                              <div className="flex-1">
+                                <label className="text-[10px] opacity-60">Qty Step</label>
+                                <input type="number" min="1" value={editFields.quantity_step} onChange={(e) => setEditFields((f) => ({ ...f, quantity_step: parseInt(e.target.value) || 1 }))} className="w-full border border-foreground bg-background px-2 py-1 text-xs font-mono focus:outline-none" />
+                              </div>
+                              <div className="flex-1">
+                                <label className="text-[10px] opacity-60">Unit</label>
+                                <input value={editFields.unit_type} onChange={(e) => setEditFields((f) => ({ ...f, unit_type: e.target.value }))} className="w-full border border-foreground bg-background px-2 py-1 text-xs focus:outline-none" placeholder="pcs, g, ml..." />
                               </div>
                             </div>
                             {/* Gallery */}

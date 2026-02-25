@@ -128,8 +128,11 @@ export type Database = {
           image_url: string
           interactions: Json
           legal_status: Json
+          min_quantity: number
           name: string
           price_xmr: number
+          quantity_step: number
+          unit_type: string
           url: string
         }
         Insert: {
@@ -146,8 +149,11 @@ export type Database = {
           image_url?: string
           interactions?: Json
           legal_status?: Json
+          min_quantity?: number
           name: string
           price_xmr?: number
+          quantity_step?: number
+          unit_type?: string
           url?: string
         }
         Update: {
@@ -164,8 +170,11 @@ export type Database = {
           image_url?: string
           interactions?: Json
           legal_status?: Json
+          min_quantity?: number
           name?: string
           price_xmr?: number
+          quantity_step?: number
+          unit_type?: string
           url?: string
         }
         Relationships: []
