@@ -21,6 +21,7 @@ const ProductDetail = () => {
   const [product, setProduct] = useState<Product | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [selectedImage, setSelectedImage] = useState(0);
+  const [quantity, setQuantity] = useState(1);
   const { addItem } = useCart();
   const { xmrToUsd } = useXmrRate();
 
@@ -71,6 +72,16 @@ const ProductDetail = () => {
 
   const usdPrice = xmrToUsd(product.price_xmr);
 
+  const minQty = p.min_quantity ?? 1;
+  const step = p.quantity_step ?? minQty;
+  const unitType = p.unit_type ?? 'pcs';
+  const perUnitUsd = usdPrice !== null && minQty > 0 ? usdPrice / minQty : null;
+
+  // Initialize quantity to minQty on product load
+  if (quantity < minQty) {
+    setQuantity(minQty);
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -111,14 +122,41 @@ const ProductDetail = () => {
                   <span className="text-sm opacity-50 ml-2">~${usdPrice.toFixed(2)}</span>
                 )}
               </p>
+              {perUnitUsd !== null && minQty > 1 && (
+                <p className="text-xs opacity-50 font-mono">
+                  from ${perUnitUsd.toFixed(2)} per {unitType}
+                </p>
+              )}
             </div>
             <p className="text-sm leading-relaxed opacity-80">{product.description}</p>
 
+            {/* Quantity selector */}
+            <div className="flex items-center gap-3">
+              <span className="text-xs opacity-60">Qty:</span>
+              <div className="flex items-center border border-foreground">
+                <button
+                  onClick={() => setQuantity((q) => Math.max(minQty, q - step))}
+                  className="px-3 py-1.5 text-sm hover:bg-foreground hover:text-background transition-colors"
+                >
+                  −
+                </button>
+                <span className="px-4 py-1.5 text-sm font-mono border-x border-foreground">
+                  {quantity} {unitType}
+                </span>
+                <button
+                  onClick={() => setQuantity((q) => q + step)}
+                  className="px-3 py-1.5 text-sm hover:bg-foreground hover:text-background transition-colors"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
             <button
-              onClick={() => addItem(product)}
+              onClick={() => addItem(product, quantity)}
               className="w-full border border-foreground py-3 text-sm font-medium hover:bg-foreground hover:text-background transition-colors"
             >
-              ADD TO CART
+              ADD TO CART — {(product.price_xmr * quantity).toFixed(4)} XMR
             </button>
 
             <OrderForm product={product} />
