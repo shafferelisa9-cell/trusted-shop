@@ -20,23 +20,21 @@ const Header = () => {
   const adminTotal = adminUnreadOrders + adminUnreadMessages;
 
   return (
-    <header className="border-b border-foreground">
+    <header className="sticky top-0 z-50 bg-background">
       {/* Scrolling banner */}
-      <div className="border-b border-foreground overflow-hidden bg-foreground text-background">
-        <div className="animate-marquee whitespace-nowrap py-1.5 text-[11px] tracking-wider uppercase">
-          <span className="mx-8">Can't find what you need? Message us — we'll check if we have it.</span>
-          <span className="mx-8">★</span>
-          <span className="mx-8">Can't find what you need? Message us — we'll check if we have it.</span>
-          <span className="mx-8">★</span>
-          <span className="mx-8">Can't find what you need? Message us — we'll check if we have it.</span>
-          <span className="mx-8">★</span>
+      <div className="overflow-hidden bg-foreground text-background">
+        <div className="animate-marquee whitespace-nowrap py-2 text-[11px] tracking-[0.2em] uppercase font-medium">
+          <span className="mx-10">✦ Can't find what you need? Send us a message — we'll let you know if we have it ✦</span>
+          <span className="mx-10">✦ Can't find what you need? Send us a message — we'll let you know if we have it ✦</span>
+          <span className="mx-10">✦ Can't find what you need? Send us a message — we'll let you know if we have it ✦</span>
         </div>
       </div>
-      <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-3">
-          <span className="text-lg font-medium tracking-tight">NAGSOM</span>
-          <span className="text-[9px] uppercase tracking-widest opacity-50 border border-foreground/30 px-2 py-0.5">USA only</span>
-        </Link>
+      <div className="border-b border-foreground">
+        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-3">
+            <span className="text-lg font-medium tracking-tight">NAGSOM</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.15em] bg-foreground text-background px-2.5 py-1 leading-none">USA Delivery Only</span>
+          </Link>
         <nav className="flex gap-6 text-sm items-center">
           <Link to="/" className="hover:opacity-60 transition-opacity">Products</Link>
           <Link to="/cart" className="hover:opacity-60 transition-opacity">
