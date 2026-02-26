@@ -15,13 +15,10 @@ const OrderStatus = () => {
   useEffect(() => {
     if (!token) return;
     supabase
-      .from('orders')
-      .select('*, products(*)')
-      .eq('tracking_token', token)
-      .single()
+      .rpc('get_order_by_token', { p_token: token })
       .then(({ data }) => {
         if (data) {
-          setOrder(data);
+          setOrder(data as any);
           setProduct((data as any).products);
         }
       });

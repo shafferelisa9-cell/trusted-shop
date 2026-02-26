@@ -17,12 +17,9 @@ const MyOrders = () => {
   useEffect(() => {
     if (!userId) return;
     supabase
-      .from('orders')
-      .select('*, products(name)')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
+      .rpc('get_user_orders', { p_user_id: userId })
       .then(({ data }) => {
-        if (data) setOrders(data);
+        if (data) setOrders(data as any[]);
       });
   }, [userId]);
 
