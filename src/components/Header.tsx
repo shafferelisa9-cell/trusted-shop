@@ -57,6 +57,7 @@ const Header = () => {
             <Link to="/auth" className="hover:opacity-60 transition-opacity">Login</Link>
           )}
         </nav>
+        </div>
       </div>
     </header>
   );
