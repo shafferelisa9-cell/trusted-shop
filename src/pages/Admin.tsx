@@ -241,6 +241,17 @@ const Admin = () => {
     setEditFields((prev) => ({ ...prev, categories: prev.categories.filter((c) => c !== cat) }));
   };
 
+  const MAX_BULK_ITEMS = 100;
+  const MAX_STRING_LEN = 5000;
+  const MAX_JSONB_SIZE = 50000; // chars when stringified
+
+  const validateJsonbField = (val: unknown, fieldName: string): string | null => {
+    if (val === undefined || val === null) return null;
+    const str = JSON.stringify(val);
+    if (str.length > MAX_JSONB_SIZE) return `${fieldName} exceeds max size (${MAX_JSONB_SIZE} chars)`;
+    return null;
+  };
+
   const bulkImportProducts = async () => {
     setBulkImporting(true);
     setBulkResult(null);
@@ -250,16 +261,59 @@ const Admin = () => {
       let parsed = JSON.parse(bulkJson);
       if (!Array.isArray(parsed)) parsed = [parsed];
 
+      if (parsed.length > MAX_BULK_ITEMS) {
+        errors.push(`Too many items: ${parsed.length}. Maximum is ${MAX_BULK_ITEMS}.`);
+        setBulkResult({ success: 0, errors });
+        setBulkImporting(false);
+        return;
+      }
+
       for (let i = 0; i < parsed.length; i++) {
         const item = parsed[i];
-        if (!item.name) {
-          errors.push(`Item ${i + 1}: missing required "name" field`);
+        // Validate name
+        if (!item.name || typeof item.name !== 'string' || item.name.trim().length === 0) {
+          errors.push(`Item ${i + 1}: missing or invalid "name" field`);
           continue;
         }
+        if (item.name.length > 200) {
+          errors.push(`Item ${i + 1} "${item.name.slice(0, 30)}...": name exceeds 200 chars`);
+          continue;
+        }
+        // Validate description length
+        const desc = typeof item.description === 'string' ? item.description : '';
+        if (desc.length > MAX_STRING_LEN) {
+          errors.push(`"${item.name}": description exceeds ${MAX_STRING_LEN} chars`);
+          continue;
+        }
+        // Validate price
+        const priceRaw = item.price ?? item.price_xmr ?? 0;
+        const price = parseFloat(priceRaw);
+        if (isNaN(price) || price < 0) {
+          errors.push(`"${item.name}": invalid price`);
+          continue;
+        }
+        // Validate categories
+        if (item.categories && (!Array.isArray(item.categories) || item.categories.length > 20)) {
+          errors.push(`"${item.name}": categories must be an array with max 20 items`);
+          continue;
+        }
+        // Validate JSONB field sizes
+        const jsonbFields = ['dosage', 'duration', 'effects', 'harm_reduction', 'detection_times', 'interactions', 'legal_status'];
+        let jsonbError = false;
+        for (const field of jsonbFields) {
+          const err = validateJsonbField(item[field], field);
+          if (err) {
+            errors.push(`"${item.name}": ${err}`);
+            jsonbError = true;
+            break;
+          }
+        }
+        if (jsonbError) continue;
+
         const row: any = {
-          name: item.name,
-          description: item.description || '',
-          price_xmr: item.price ? parseFloat(item.price) : (item.price_xmr ? parseFloat(item.price_xmr) : 0),
+          name: item.name.trim(),
+          description: desc,
+          price_xmr: price,
           image_url: item.image_url || '/placeholder.svg',
           url: item.url || '',
           categories: item.categories || [],
